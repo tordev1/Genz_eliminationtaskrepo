@@ -19,7 +19,7 @@
   "use strict";
 
   var MAX_BYTES = 200 * 1024 * 1024; // 200 MB, matches the limit stated on the page
-  var MAX_SECONDS = 120; // 2 minutes; server re-checks this with an actual video probe
+  var MAX_SECONDS = 30; // kept short for this demo's hosting; server re-checks with an actual video probe
 
   var fileInput = document.getElementById("demo-file");
   var runBtn = document.getElementById("demo-run");

@@ -22,7 +22,9 @@ that has NOT been done and is not claimed anywhere on the page.
 """
 from __future__ import annotations
 
+import json
 import os
+import subprocess
 import sys
 import tempfile
 import traceback
@@ -31,6 +33,7 @@ from flask import Flask, jsonify, request, send_from_directory
 
 WEBSITE_DIR = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.abspath(os.path.join(WEBSITE_DIR, ".."))
+WORKER_SCRIPT = os.path.join(WEBSITE_DIR, "_detect_worker.py")
 
 # So `import solution` (and its own `from src...` imports) resolve to the
 # repository root, exactly as run_submission.py does it.
@@ -38,7 +41,14 @@ if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
 MAX_CONTENT_BYTES = 200 * 1024 * 1024  # 200 MB, matches the limit stated on the page
-MAX_DURATION_SEC = 120.0  # 2 minutes, verified server-side via an actual video probe
+# Deliberately conservative: this demo has been observed to run on shared
+# hosting with a short (~15s) request timeout and a tight per-process
+# memory cap -- 30s keeps real processing time well inside that, even
+# though solution.py itself has no such limit (the actual submission's
+# time budget is 3x video duration, per the challenge spec; this cap is a
+# demo-hosting constraint only, not a pipeline limitation).
+MAX_DURATION_SEC = 30.0
+WORKER_TIMEOUT_SEC = 45.0
 
 app = Flask(__name__, static_folder=None)
 app.config["MAX_CONTENT_LENGTH"] = MAX_CONTENT_BYTES
@@ -104,30 +114,38 @@ def detect_events_endpoint():
                     {
                         "error": (
                             "Video is {:.0f}s long; this demo is limited to "
-                            "{:.0f}s (2 minutes) so it stays responsive on CPU."
+                            "{:.0f}s so it stays responsive on this host."
                         ).format(duration, MAX_DURATION_SEC)
                     }
                 ),
                 400,
             )
 
-        import solution  # imported lazily so a missing opencv/numpy fails per-request, not at server start
+        # Run detection in a fresh subprocess rather than in-process: OpenCV
+        # and numpy often don't release memory back to the OS even after
+        # Python's own GC runs, and this Flask worker is long-lived on the
+        # host (Passenger reuses it across requests). A subprocess fully
+        # releases its memory to the OS on exit, which matters on
+        # memory-constrained shared hosting -- see the module docstring in
+        # _detect_worker.py.
+        result = subprocess.run(
+            [sys.executable, WORKER_SCRIPT, tmp_path],
+            capture_output=True, text=True, timeout=WORKER_TIMEOUT_SEC,
+        )
+        if result.returncode != 0:
+            print("detect worker failed:\n", result.stderr, file=sys.stderr)
+            return (
+                jsonify({"error": "solution.detect_events() raised an exception while processing this file."}),
+                500,
+            )
+        payload = json.loads(result.stdout.strip().splitlines()[-1])
+        return jsonify(payload)
 
-        events = solution.detect_events(tmp_path)
-
-        # Defensive: solution.py should already return [start, end, label]
-        # triples, but the demo endpoint is a good place to guarantee it,
-        # the same way run_submission.py's _clean_events does for the harness.
-        safe_events = []
-        for ev in events:
-            try:
-                s, e, label = ev
-                safe_events.append([float(s), float(e), str(label)])
-            except Exception:
-                continue
-
-        return jsonify({"events": safe_events})
-
+    except subprocess.TimeoutExpired:
+        return (
+            jsonify({"error": f"Processing took longer than {WORKER_TIMEOUT_SEC:.0f}s and was stopped. Try a shorter clip."}),
+            504,
+        )
     except Exception:
         # Full traceback goes to the server log, not the HTTP response --
         # this file is meant to be deployed publicly (see website/README.md),
