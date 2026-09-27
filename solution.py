@@ -1,9 +1,11 @@
 """Team Genz -- Part A + Part B reference implementation.
 
-This is the file the harness imports. It only wires together the modules in
-src/: a per-frame detector, an IoU tracker, an offline rule engine (Part A)
-and a causal risk engine (Part B). See README.md for the full write-up and
-docs/REPORT.md for what worked / what did not.
+Implements the WIUT Hackathon 2026 CV-track interface (organizers'
+`wiut_cv_scripts/solution.py` template: CLASSES, detect_events, RiskEstimator).
+This file only wires together the modules in src/: a per-frame detector, an
+IoU tracker, an offline rule engine (Part A) and a causal risk engine
+(Part B). See README.md for the full write-up and docs/REPORT.md for what
+worked / what did not.
 """
 from __future__ import annotations
 
@@ -15,7 +17,7 @@ try:
     import cv2
 except ImportError as exc:
     raise RuntimeError(
-        "opencv-python is required. Install with: pip install -r requirements.txt"
+        "opencv-python-headless is required. Install with: pip install -r requirements.txt"
     ) from exc
 
 from src.detector import build_default_detector
@@ -23,11 +25,19 @@ from src.rules import build_events
 from src.risk import CausalRiskEngine
 from src.tracker import IouTracker
 
-CLASSES = [
+# Official class ids (14, exact order per the task spec). May only be
+# shrunk (never added to) -- run_submission.py filters against
+# evaluate.OFFICIAL_CLASSES anyway, so this list is never a source of truth
+# for grading, only documentation.
+CLASSES: list[str] = [
     "accident", "near_miss", "red_light", "wrong_way", "illegal_u_turn",
     "stopped_vehicle", "jaywalking", "failure_to_yield", "illegal_turn",
     "solid_line_crossing", "stop_line", "congestion", "road_obstacle", "fire_smoke",
 ]
+
+# Anticipation horizon used by the metric (seconds). RiskEstimator.step()
+# returns P(an `accident` starts within the next RISK_HORIZON_SEC seconds).
+RISK_HORIZON_SEC = 5.0
 
 # Determinism (see README "Determinism").
 random.seed(0)
@@ -66,14 +76,20 @@ def detect_events(video_path: str) -> list:
     frame_idx = 0
     last_t = 0.0
     while True:
-        ok, frame = cap.read()
-        if not ok:
-            break
         if frame_idx % stride == 0:
+            # Full decode only for frames we actually analyze.
+            ok, frame = cap.read()
+            if not ok:
+                break
             t_sec = frame_idx / native_fps
             last_t = t_sec
             detections = detector.detect(frame)
             tracker.update(detections, t_sec)
+        else:
+            # cap.grab() advances the stream without decoding the frame --
+            # cheap compared to cap.read() on the frames the stride skips.
+            if not cap.grab():
+                break
         frame_idx += 1
     cap.release()
 

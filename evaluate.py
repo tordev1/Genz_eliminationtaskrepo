@@ -1,341 +1,431 @@
-"""Starter-kit metric (per the challenge spec): format check (--validate-only)
-plus Score_A, Score_B and the combined model score M, computed exactly as
-described in the challenge's "Evaluation & scoring" section.
+#!/usr/bin/env python3
+"""
+evaluate.py — the official metric. Do not modify.
 
-Usage:
-    python evaluate.py --pred predictions.json --validate-only
-    python evaluate.py --pred predictions.json --gt ground_truth.json
+    python evaluate.py --pred predictions.json --gt ground_truth.json [--json report.json] [--per-video]
+    python evaluate.py --pred predictions.json --validate-only            # format check without labels
+
+Format check (runs first; any error -> exit code 1, nothing is scored)
+    * top level {"videos": {<file name>: {"events": [...], "risk": [...]?}}}
+    * event = [start_sec, end_sec, label]; numbers; 0 <= start < end; label in OFFICIAL_CLASSES
+    * segments of the same class in one video do not overlap
+    * risk = [[t_sec, score], ...]; t non-decreasing; 0 <= score <= 1
+    * every ground-truth video is present (even with "events": []); end_sec <= duration + 0.5 s
+
+Part A  (event detection)
+    For each class c and each tIoU threshold tau in {0.3, 0.5, 0.7}: greedy
+    one-to-one matching of predicted and ground-truth segments by descending
+    temporal IoU (pairs below tau never match). TP/FP/FN are pooled over all
+    videos, then F1_c(tau).  Score_A = mean over classes of mean over tau of F1_c(tau).
+    Classes = those present in the ground truth OR in the predictions.
+
+Part B  (accident anticipation; `accident` events only; H=5 s, W=10 s, theta=0.5)
+    Frame labels: positive if s-H <= t < s for some accident starting at s;
+    ignored inside any accident [s, e] and inside [s-H, e] of any near_miss;
+    negative otherwise.
+      AP        average precision of the risk score over labelled frames (pooled),
+                chance-normalised: AP = max(0, (AP_raw - r) / (1 - r)), r = positive rate,
+                so a constant or random score gets 0
+      F1_alarm  alarms = maximal runs with score >= theta, runs closer than 2 s
+                merged, alarm time = run start; an alarm in [s-W, s) of a
+                still-unmatched accident matches it (earliest alarm wins);
+                alarms starting on ignored frames are dropped
+      mTTA      mean over accidents of (s - matched alarm start), 0 if unmatched
+    Score_B = 0.4*AP + 0.4*F1_alarm + 0.2*mTTA/W
+
+Model score  M = 0.7*Score_A + 0.3*Score_B   (M = Score_A if the test set has no accidents)
 """
 from __future__ import annotations
 
 import argparse
 import json
 import sys
-from typing import Dict, List, Tuple
+from collections import defaultdict
+from pathlib import Path
 
-CLASSES = [
+OFFICIAL_CLASSES = [
     "accident", "near_miss", "red_light", "wrong_way", "illegal_u_turn",
     "stopped_vehicle", "jaywalking", "failure_to_yield", "illegal_turn",
     "solid_line_crossing", "stop_line", "congestion", "road_obstacle", "fire_smoke",
 ]
-THRESHOLDS = (0.3, 0.5, 0.7)
-H_SEC = 5.0   # accident-anticipation horizon
-W_SEC = 10.0  # alarm-matching window
-THETA = 0.5   # alarm threshold
-ALARM_MERGE_GAP = 2.0
+
+TIOU_THRESHOLDS = (0.3, 0.5, 0.7)
+H = 5.0            # anticipation horizon (s)
+W = 10.0           # alarm matching window before an accident (s)
+THETA = 0.5        # alarm threshold on the risk score
+MERGE_GAP = 2.0    # alarm runs closer than this are merged (s)
+WEIGHT_A, WEIGHT_B = 0.7, 0.3
+B_WEIGHTS = {"ap": 0.4, "f1_alarm": 0.4, "mtta": 0.2}
 
 
-class ValidationError(Exception):
-    pass
+# ----------------------------------------------------------------------------
+# format check
+# ----------------------------------------------------------------------------
+def _is_num(x) -> bool:
+    return isinstance(x, (int, float)) and not isinstance(x, bool)
 
 
-def temporal_iou(a_start, a_end, b_start, b_end) -> float:
-    inter = max(0.0, min(a_end, b_end) - max(a_start, b_start))
-    if inter <= 0:
-        return 0.0
-    union = (a_end - a_start) + (b_end - b_start) - inter
+def validate(pred, gt: dict | None = None, classes=OFFICIAL_CLASSES) -> tuple[list[str], list[str]]:
+    """Return (errors, warnings). Any error means the file cannot be scored."""
+    errors, warnings = [], []
+    if not isinstance(pred, dict) or not isinstance(pred.get("videos"), dict):
+        return ['top level must be {"videos": {...}}'], warnings
+    if "team" not in pred:
+        warnings.append('missing "team" name')
+
+    for vid, entry in pred["videos"].items():
+        where = f"videos[{vid!r}]"
+        if "/" in vid or "\\" in vid:
+            errors.append(f"{where}: key must be a file name, not a path")
+        if not isinstance(entry, dict) or not isinstance(entry.get("events"), list):
+            errors.append(f'{where}: must be {{"events": [...], "risk": [...]}}')
+            continue
+        by_class: dict[str, list[tuple[float, float]]] = {}
+        for i, ev in enumerate(entry["events"]):
+            w = f"{where}.events[{i}]"
+            if not (isinstance(ev, list) and len(ev) == 3):
+                errors.append(f"{w}: must be [start_sec, end_sec, label], got {ev!r}")
+                continue
+            s, e, label = ev
+            if not (_is_num(s) and _is_num(e)):
+                errors.append(f"{w}: start/end must be numbers, got {s!r}, {e!r}")
+                continue
+            if not (0 <= s < e):
+                errors.append(f"{w}: need 0 <= start < end, got [{s}, {e}]")
+            if not isinstance(label, str) or label not in classes:
+                errors.append(f"{w}: label {label!r} not in the official class list")
+                continue
+            if gt is not None and vid in gt and e > float(gt[vid].get("duration", float("inf"))) + 0.5:
+                errors.append(f"{w}: end {e} > video duration {gt[vid]['duration']}")
+            by_class.setdefault(label, []).append((float(s), float(e)))
+        for label, ss in by_class.items():
+            ss.sort()
+            for (s1, e1), (s2, e2) in zip(ss, ss[1:]):
+                if s2 < e1:
+                    errors.append(f"{where}: overlapping {label!r} segments [{s1}, {e1}] and [{s2}, {e2}]")
+        risk = entry.get("risk", [])
+        if not isinstance(risk, list):
+            errors.append(f"{where}.risk: must be a list")
+        else:
+            prev_t = -1.0
+            for j, item in enumerate(risk):
+                if not (isinstance(item, list) and len(item) == 2 and _is_num(item[0]) and _is_num(item[1])):
+                    errors.append(f"{where}.risk[{j}]: must be [t_sec, score], got {item!r}")
+                    break
+                if item[0] < prev_t:
+                    errors.append(f"{where}.risk[{j}]: timestamps must be non-decreasing")
+                    break
+                if not (0.0 <= item[1] <= 1.0):
+                    errors.append(f"{where}.risk[{j}]: score {item[1]} outside [0, 1]")
+                    break
+                prev_t = item[0]
+            if not risk:
+                warnings.append(f"{where}: no risk curve (Part B scores 0 for this video)")
+        if gt is not None and vid not in gt:
+            warnings.append(f"{where}: not in the ground truth, ignored")
+    if gt is not None:
+        for v in gt:
+            if v not in pred["videos"]:
+                errors.append(f"ground-truth video {v!r} missing from predictions (must be present, even with [])")
+    return errors, warnings
+
+
+# ----------------------------------------------------------------------------
+# helpers
+# ----------------------------------------------------------------------------
+def tiou(a: tuple[float, float], b: tuple[float, float]) -> float:
+    inter = max(0.0, min(a[1], b[1]) - max(a[0], b[0]))
+    union = (a[1] - a[0]) + (b[1] - b[0]) - inter
     return inter / union if union > 0 else 0.0
 
 
-def validate_predictions(pred: dict, gt_video_ids: List[str] = None) -> None:
-    if "team" not in pred or not isinstance(pred["team"], str) or not pred["team"]:
-        raise ValidationError("predictions.json missing a non-empty 'team' string")
-    if "videos" not in pred or not isinstance(pred["videos"], dict):
-        raise ValidationError("predictions.json missing a 'videos' object")
-
-    if gt_video_ids is not None:
-        missing = set(gt_video_ids) - set(pred["videos"].keys())
-        if missing:
-            raise ValidationError(f"predictions.json is missing videos: {sorted(missing)}")
-
-    for vid, entry in pred["videos"].items():
-        if "events" not in entry or not isinstance(entry["events"], list):
-            raise ValidationError(f"[{vid}] missing 'events' list")
-        if "risk" not in entry or not isinstance(entry["risk"], list):
-            raise ValidationError(f"[{vid}] missing 'risk' list")
-
-        by_class_intervals: Dict[str, List[Tuple[float, float]]] = {}
-        for ev in entry["events"]:
-            if not (isinstance(ev, list) and len(ev) == 3):
-                raise ValidationError(f"[{vid}] malformed event (expected [start, end, label]): {ev}")
-            start, end, label = ev
-            if not isinstance(start, (int, float)) or not isinstance(end, (int, float)):
-                raise ValidationError(f"[{vid}] non-numeric event bounds: {ev}")
-            if label not in CLASSES:
-                raise ValidationError(f"[{vid}] unknown label {label!r} in event: {ev}")
-            if not (start < end):
-                raise ValidationError(f"[{vid}] start_sec >= end_sec in event: {ev}")
-            for s, e in by_class_intervals.get(label, []):
-                if start < e and s < end:
-                    raise ValidationError(
-                        f"[{vid}] overlapping segments of class {label!r}: {ev} overlaps ({s}, {e})"
-                    )
-            by_class_intervals.setdefault(label, []).append((start, end))
-
-        prev_t = None
-        for pair in entry["risk"]:
-            if not (isinstance(pair, list) and len(pair) == 2):
-                raise ValidationError(f"[{vid}] malformed risk sample (expected [t_sec, score]): {pair}")
-            t_sec, score = pair
-            if not isinstance(t_sec, (int, float)) or not isinstance(score, (int, float)):
-                raise ValidationError(f"[{vid}] non-numeric risk sample: {pair}")
-            if not (0.0 <= score <= 1.0):
-                raise ValidationError(f"[{vid}] risk score out of [0, 1]: {pair}")
-            if prev_t is not None and t_sec < prev_t:
-                raise ValidationError(f"[{vid}] risk samples not in increasing time order near {pair}")
-            prev_t = t_sec
+def prf(tp: int, fp: int, fn: int) -> dict:
+    p = tp / (tp + fp) if tp + fp else 0.0
+    r = tp / (tp + fn) if tp + fn else 0.0
+    f1 = 2 * p * r / (p + r) if p + r else 0.0
+    return {"tp": tp, "fp": fp, "fn": fn, "precision": p, "recall": r, "f1": f1}
 
 
-# ---------------------------------------------------------------------------
-# Score A -- event detection
-# ---------------------------------------------------------------------------
-
-def _match_class_in_video(gt_segs, pred_segs, tau):
+def match_segments(gt: list[tuple[float, float]], pred: list[tuple[float, float]], thr: float) -> tuple[int, int, int]:
+    """Greedy one-to-one matching by descending IoU. Returns (tp, fp, fn)."""
     pairs = []
-    for gi, (gs, ge) in enumerate(gt_segs):
-        for pi, (ps, pe) in enumerate(pred_segs):
-            i = temporal_iou(gs, ge, ps, pe)
-            if i > 0:
-                pairs.append((i, gi, pi))
-    pairs.sort(key=lambda x: -x[0])
-
-    matched_gt, matched_pred = set(), set()
-    for i, gi, pi in pairs:
-        if i < tau:
-            break
-        if gi in matched_gt or pi in matched_pred:
+    for i, g in enumerate(gt):
+        for j, p in enumerate(pred):
+            iou = tiou(g, p)
+            if iou >= thr:
+                pairs.append((iou, i, j))
+    pairs.sort(reverse=True)
+    used_g, used_p = set(), set()
+    for _, i, j in pairs:
+        if i in used_g or j in used_p:
             continue
-        matched_gt.add(gi)
-        matched_pred.add(pi)
-
-    tp = len(matched_gt)
-    fp = len(pred_segs) - len(matched_pred)
-    fn = len(gt_segs) - len(matched_gt)
-    return tp, fp, fn
+        used_g.add(i)
+        used_p.add(j)
+    tp = len(used_g)
+    return tp, len(pred) - tp, len(gt) - tp
 
 
-def compute_score_a(gt: dict, pred: dict):
-    classes_present = set()
-    for entry in gt.values():
-        for _, _, c in entry["events"]:
-            classes_present.add(c)
-    for entry in pred["videos"].values():
-        for _, _, c in entry["events"]:
-            classes_present.add(c)
+def segs(events, label: str | None = None) -> list[tuple[float, float]]:
+    return [(float(s), float(e)) for s, e, lab in events if label is None or lab == label]
+
+
+# ----------------------------------------------------------------------------
+# Part A
+# ----------------------------------------------------------------------------
+def evaluate_part_a(gt: dict, pred_videos: dict, per_video: bool = False) -> dict:
+    classes = sorted(
+        {lab for v in gt.values() for _, _, lab in v["events"]}
+        | {lab for v in pred_videos.values() for _, _, lab in v.get("events", [])}
+    )
+    counts = {c: {t: [0, 0, 0] for t in TIOU_THRESHOLDS} for c in classes}
+    micro = {t: [0, 0, 0] for t in TIOU_THRESHOLDS}
+    agnostic = {t: [0, 0, 0] for t in TIOU_THRESHOLDS}
+    video_rows = []
+
+    for vid, g in gt.items():
+        p_events = pred_videos.get(vid, {}).get("events", [])
+        row = {"video": vid, "gt": len(g["events"]), "pred": len(p_events)}
+        for c in classes:
+            gs, ps = segs(g["events"], c), segs(p_events, c)
+            for t in TIOU_THRESHOLDS:
+                tp, fp, fn = match_segments(gs, ps, t)
+                for k, val in enumerate((tp, fp, fn)):
+                    counts[c][t][k] += val
+                    micro[t][k] += val
+                if t == 0.5:
+                    row[c] = f"{tp}/{fp}/{fn}"
+        for t in TIOU_THRESHOLDS:
+            tp, fp, fn = match_segments(segs(g["events"]), segs(p_events), t)
+            for k, val in enumerate((tp, fp, fn)):
+                agnostic[t][k] += val
+        video_rows.append(row)
 
     per_class = {}
-    per_class_per_tau = {}
-    for c in sorted(classes_present):
-        f1s = []
-        for tau in THRESHOLDS:
-            tp_total = fp_total = fn_total = 0
-            for vid, gt_entry in gt.items():
-                gt_segs = [(s, e) for s, e, cc in gt_entry["events"] if cc == c]
-                pred_entry = pred["videos"].get(vid, {"events": []})
-                pred_segs = [(s, e) for s, e, cc in pred_entry["events"] if cc == c]
-                tp, fp, fn = _match_class_in_video(gt_segs, pred_segs, tau)
-                tp_total += tp
-                fp_total += fp
-                fn_total += fn
-            denom = 2 * tp_total + fp_total + fn_total
-            f1 = (2 * tp_total / denom) if denom > 0 else 1.0
-            f1s.append(f1)
-        per_class_per_tau[c] = dict(zip(THRESHOLDS, f1s))
-        per_class[c] = sum(f1s) / len(f1s)
+    for c in classes:
+        per_class[c] = {str(t): prf(*counts[c][t]) for t in TIOU_THRESHOLDS}
+        per_class[c]["f1_mean"] = sum(per_class[c][str(t)]["f1"] for t in TIOU_THRESHOLDS) / len(TIOU_THRESHOLDS)
+    score_a = sum(per_class[c]["f1_mean"] for c in classes) / len(classes) if classes else 0.0
 
-    score_a = sum(per_class.values()) / len(per_class) if per_class else 0.0
-    return score_a, per_class, per_class_per_tau
+    return {
+        "score_a": score_a,
+        "classes": classes,
+        "per_class": per_class,
+        "micro": {str(t): prf(*micro[t]) for t in TIOU_THRESHOLDS},
+        "class_agnostic": {str(t): prf(*agnostic[t]) for t in TIOU_THRESHOLDS},
+        "per_video": video_rows if per_video else None,
+    }
 
 
-# ---------------------------------------------------------------------------
-# Score B -- accident anticipation
-# ---------------------------------------------------------------------------
+# ----------------------------------------------------------------------------
+# Part B
+# ----------------------------------------------------------------------------
+def frame_label(t: float, accidents: list[tuple[float, float]], near_misses: list[tuple[float, float]]):
+    """+1 positive, 0 negative, None ignored."""
+    for s, e in accidents:
+        if s <= t <= e:
+            return None
+    for s, e in accidents:
+        if s - H <= t < s:
+            return 1
+    for s, e in near_misses:
+        if s - H <= t <= e:
+            return None
+    return 0
 
-def _average_precision(labels: List[int], scores: List[float]) -> float:
-    """sklearn-equivalent AP: sum_n (R_n - R_{n-1}) * P_n over rank-sorted
-    scores (descending), no external dependency."""
+
+def average_precision(scores: list[float], labels: list[int]) -> float:
+    """AP = sum_k (R_k - R_{k-1}) * P_k over unique score thresholds (sklearn definition)."""
     n_pos = sum(labels)
-    if n_pos == 0:
+    if n_pos == 0 or not scores:
         return 0.0
     order = sorted(range(len(scores)), key=lambda i: -scores[i])
-    tp = 0
-    fp = 0
-    ap = 0.0
-    prev_recall = 0.0
-    for idx in order:
-        if labels[idx] == 1:
-            tp += 1
-        else:
-            fp += 1
-        precision = tp / (tp + fp)
-        recall = tp / n_pos
+    ap, tp, fp, prev_recall, i = 0.0, 0, 0, 0.0, 0
+    while i < len(order):
+        thr = scores[order[i]]
+        while i < len(order) and scores[order[i]] == thr:   # take the whole tie group
+            if labels[order[i]]:
+                tp += 1
+            else:
+                fp += 1
+            i += 1
+        precision, recall = tp / (tp + fp), tp / n_pos
         ap += (recall - prev_recall) * precision
         prev_recall = recall
     return ap
 
 
-def _frame_labels_for_video(events, risk_times):
-    """-1 = ignored, 1 = positive, 0 = negative, aligned to risk_times."""
-    accidents = [(s, e) for s, e, c in events if c == "accident"]
-    near_misses = [(s, e) for s, e, c in events if c == "near_miss"]
-
-    labels = [0] * len(risk_times)
-    for i, t in enumerate(risk_times):
-        label = 0
-        for s, e in accidents:
-            if s - H_SEC <= t < s:
-                label = 1
-            if s <= t <= e:
-                label = -1
-                break
-        if label != -1:
-            for s, e in near_misses:
-                if s - H_SEC <= t <= e:
-                    label = -1
-                    break
-        labels[i] = label
-    return labels
-
-
-def _alarms_from_risk(risk):
-    """Maximal runs with score >= THETA, merged across gaps < ALARM_MERGE_GAP."""
-    if not risk:
-        return []
-    runs = []
-    run_start = None
-    run_end = None
-    for t, score in risk:
-        if score >= THETA:
-            if run_start is None:
-                run_start = t
-            run_end = t
-        else:
-            if run_start is not None:
-                runs.append([run_start, run_end])
-                run_start = None
-    if run_start is not None:
-        runs.append([run_start, run_end])
-
-    merged = []
+def alarm_starts(curve: list[list[float]], theta: float = THETA, merge_gap: float = MERGE_GAP) -> list[float]:
+    runs, start, end = [], None, None
+    for t, s in curve:
+        if s >= theta:
+            if start is None:
+                start = t
+            end = t
+        elif start is not None:
+            runs.append((start, end))
+            start = None
+    if start is not None:
+        runs.append((start, end))
+    merged: list[list[float]] = []
     for s, e in runs:
-        if merged and s - merged[-1][1] < ALARM_MERGE_GAP:
+        if merged and s - merged[-1][1] < merge_gap:
             merged[-1][1] = e
         else:
             merged.append([s, e])
-    return merged
+    return [m[0] for m in merged]
 
 
-def compute_score_b(gt: dict, pred: dict):
-    all_labels, all_scores = [], []
-    total_matched_alarms = total_alarms = 0
-    total_matched_accidents = total_accidents = 0
-    ttas = []
+def evaluate_part_b(gt: dict, pred_videos: dict) -> dict | None:
+    n_accidents = sum(1 for v in gt.values() for _, _, lab in v["events"] if lab == "accident")
+    if n_accidents == 0:
+        return None
 
-    for vid, gt_entry in gt.items():
-        events = gt_entry["events"]
-        risk = pred["videos"].get(vid, {"risk": []})["risk"]
-        risk_times = [r[0] for r in risk]
-        risk_scores = [r[1] for r in risk]
+    all_scores, all_labels = [], []
+    n_alarms, n_matched, tta_sum = 0, 0, 0.0
+    per_video = {}
 
-        frame_labels = _frame_labels_for_video(events, risk_times)
-        ignored_intervals = []  # for discarding alarms starting inside ignored frames
-        for i, lbl in enumerate(frame_labels):
-            if lbl == -1:
-                ignored_intervals.append(risk_times[i])
+    for vid, g in gt.items():
+        accidents = sorted(segs(g["events"], "accident"))
+        near_misses = segs(g["events"], "near_miss")
+        curve = pred_videos.get(vid, {}).get("risk", []) or []
+
+        # frame-level AP samples
+        for t, s in curve:
+            lab = frame_label(float(t), accidents, near_misses)
+            if lab is not None:
+                all_scores.append(float(s))
+                all_labels.append(lab)
+
+        # alarms
+        starts = [a for a in alarm_starts(curve) if frame_label(a, accidents, near_misses) is not None]
+        n_alarms += len(starts)
+        unmatched = list(starts)
+        ttas = []
+        for s, _ in accidents:
+            cands = [a for a in unmatched if s - W <= a < s]
+            if cands:
+                a = min(cands)
+                unmatched.remove(a)
+                ttas.append(s - a)
+                n_matched += 1
+                tta_sum += s - a
             else:
-                all_labels.append(lbl)
-                all_scores.append(risk_scores[i])
-
-        accidents = sorted([(s, e) for s, e, c in events if c == "accident"], key=lambda x: x[0])
-        alarms = _alarms_from_risk(risk)
-
-        def starts_in_ignored(t):
-            return any(abs(t - it) < 1e-6 for it in ignored_intervals)
-
-        alarms = [a for a in alarms if not starts_in_ignored(a[0])]
-        total_alarms += len(alarms)
-        total_accidents += len(accidents)
-
-        matched_accident_idx = set()
-        for a_start, _a_end in alarms:
-            candidates = [
-                (s, i) for i, (s, e) in enumerate(accidents)
-                if i not in matched_accident_idx and (s - W_SEC) <= a_start < s
-            ]
-            if not candidates:
-                continue
-            candidates.sort(key=lambda x: x[0])
-            s, i = candidates[0]
-            matched_accident_idx.add(i)
-            total_matched_alarms += 1
-            total_matched_accidents += 1
-            ttas.append(s - a_start)
-
-        for i in range(len(accidents)):
-            if i not in matched_accident_idx:
                 ttas.append(0.0)
+        per_video[vid] = {"accidents": len(accidents), "alarms": len(starts), "tta": [round(x, 2) for x in ttas]}
 
-    ap_raw = _average_precision(all_labels, all_scores)
-    r = (sum(all_labels) / len(all_labels)) if all_labels else 0.0
-    ap = max(0.0, (ap_raw - r) / (1 - r)) if r < 1 else 0.0
-
-    precision = total_matched_alarms / total_alarms if total_alarms > 0 else 0.0
-    recall = total_matched_accidents / total_accidents if total_accidents > 0 else 0.0
-    f1_alarm = (2 * precision * recall / (precision + recall)) if (precision + recall) > 0 else 0.0
-
-    m_tta = sum(ttas) / len(ttas) if ttas else 0.0
-    score_b = 0.4 * ap + 0.4 * f1_alarm + 0.2 * (m_tta / W_SEC)
-
-    return score_b, {
-        "AP_raw": ap_raw, "AP": ap, "precision": precision, "recall": recall,
-        "F1_alarm": f1_alarm, "mTTA": m_tta, "total_accidents": total_accidents,
-        "total_alarms": total_alarms,
+    ap_raw = average_precision(all_scores, all_labels)
+    pos_rate = sum(all_labels) / len(all_labels) if all_labels else 0.0
+    # chance-normalised AP: a constant (or random) score gets 0, a perfect ranking gets 1
+    ap = max(0.0, (ap_raw - pos_rate) / (1.0 - pos_rate)) if pos_rate < 1.0 else 0.0
+    precision = n_matched / n_alarms if n_alarms else 0.0
+    recall = n_matched / n_accidents
+    f1 = 2 * precision * recall / (precision + recall) if precision + recall else 0.0
+    mtta = tta_sum / n_accidents
+    score_b = B_WEIGHTS["ap"] * ap + B_WEIGHTS["f1_alarm"] * f1 + B_WEIGHTS["mtta"] * min(1.0, mtta / W)
+    return {
+        "score_b": score_b,
+        "ap": ap,
+        "ap_raw": ap_raw,
+        "positive_rate": pos_rate,
+        "alarm_precision": precision,
+        "alarm_recall": recall,
+        "f1_alarm": f1,
+        "mtta_sec": mtta,
+        "n_accidents": n_accidents,
+        "n_alarms": n_alarms,
+        "n_matched": n_matched,
+        "n_frames_scored": len(all_scores),
+        "n_frames_positive": sum(all_labels),
+        "per_video": per_video,
     }
 
 
-def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--pred", required=True)
-    parser.add_argument("--gt", default=None)
-    parser.add_argument("--validate-only", action="store_true")
-    args = parser.parse_args()
+# ----------------------------------------------------------------------------
+def evaluate(gt: dict, pred: dict, per_video: bool = False) -> dict:
+    pred_videos = pred.get("videos", {})
+    missing = [v for v in gt if v not in pred_videos]
+    extra = [v for v in pred_videos if v not in gt]
+    a = evaluate_part_a(gt, pred_videos, per_video)
+    b = evaluate_part_b(gt, pred_videos)
+    model = WEIGHT_A * a["score_a"] + WEIGHT_B * b["score_b"] if b else a["score_a"]
+    return {"model_score": model, "part_a": a, "part_b": b,
+            "missing_videos": missing, "extra_videos": extra, "team": pred.get("team")}
 
-    with open(args.pred, "r", encoding="utf-8") as f:
-        pred = json.load(f)
 
-    gt = None
-    if args.gt:
-        with open(args.gt, "r", encoding="utf-8") as f:
-            gt = json.load(f)
+def print_report(rep: dict) -> None:
+    a, b = rep["part_a"], rep["part_b"]
+    print(f"Team: {rep.get('team')}")
+    if rep["missing_videos"]:
+        print(f"  ! {len(rep['missing_videos'])} ground-truth video(s) missing from predictions (scored as empty): "
+              + ", ".join(rep["missing_videos"]))
+    if rep["extra_videos"]:
+        print(f"  ! {len(rep['extra_videos'])} predicted video(s) not in ground truth (ignored)")
 
-    try:
-        validate_predictions(pred, gt_video_ids=list(gt.keys()) if gt else None)
-    except ValidationError as e:
-        print(f"INVALID: {e}")
-        sys.exit(1)
-    print("Format OK.")
+    print("\nPart A — event detection (TP/FP/FN pooled over videos)")
+    hdr = f"{'class':<20}" + "".join(f"{'F1@' + str(t):>9}" for t in TIOU_THRESHOLDS) + f"{'mean':>9}{'TP/FP/FN@0.5':>16}"
+    print(hdr)
+    for c in a["classes"]:
+        pc = a["per_class"][c]
+        m = pc["0.5"]
+        print(f"{c:<20}" + "".join(f"{pc[str(t)]['f1']:>9.3f}" for t in TIOU_THRESHOLDS)
+              + f"{pc['f1_mean']:>9.3f}{str(m['tp']) + '/' + str(m['fp']) + '/' + str(m['fn']):>16}")
+    print(f"{'micro (all events)':<20}" + "".join(f"{a['micro'][str(t)]['f1']:>9.3f}" for t in TIOU_THRESHOLDS))
+    print(f"{'class-agnostic':<20}" + "".join(f"{a['class_agnostic'][str(t)]['f1']:>9.3f}" for t in TIOU_THRESHOLDS))
+    print(f"Score A = {a['score_a']:.4f}")
+    if a.get("per_video"):
+        print("\n  per video (TP/FP/FN at tIoU 0.5):")
+        for row in a["per_video"]:
+            cells = ", ".join(f"{c}={row[c]}" for c in a["classes"] if row.get(c) and row[c] != "0/0/0")
+            print(f"  {row['video']:<28} gt={row['gt']:<3} pred={row['pred']:<3} {cells}")
 
-    if args.validate_only or gt is None:
-        return
+    print("\nPart B — accident anticipation")
+    if b is None:
+        print("  no accidents in the ground truth: Part B not scored, model score = Score A")
+    else:
+        print(f"  frames scored {b['n_frames_scored']} (positive {b['n_frames_positive']}), "
+              f"accidents {b['n_accidents']}, alarms {b['n_alarms']}, matched {b['n_matched']}")
+        print(f"  AP = {b['ap']:.3f} (raw {b['ap_raw']:.3f}, chance {b['positive_rate']:.3f})   "
+              f"alarm P/R/F1 = {b['alarm_precision']:.3f}/{b['alarm_recall']:.3f}/{b['f1_alarm']:.3f}   "
+              f"mTTA = {b['mtta_sec']:.2f} s")
+        print(f"Score B = {b['score_b']:.4f}")
+    print(f"\nMODEL SCORE = {rep['model_score']:.4f}")
 
-    score_a, per_class, per_class_per_tau = compute_score_a(gt, pred)
-    score_b, b_details = compute_score_b(gt, pred)
-    model_score = 0.7 * score_a + 0.3 * score_b
 
-    print("\nPer-class F1 (diagnostic, mean over tau 0.3/0.5/0.7):")
-    for c in sorted(per_class):
-        taus = per_class_per_tau[c]
-        print(
-            f"  {c:22s} mean={per_class[c]:.3f}  "
-            f"(0.3={taus[0.3]:.3f} 0.5={taus[0.5]:.3f} 0.7={taus[0.7]:.3f})"
-        )
+def main() -> int:
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--pred", required=True)
+    ap.add_argument("--gt", help="ground_truth.json (required unless --validate-only)")
+    ap.add_argument("--json", help="write the full report here")
+    ap.add_argument("--per-video", action="store_true")
+    ap.add_argument("--validate-only", action="store_true", help="format check only, no scoring")
+    args = ap.parse_args()
 
-    print(f"\nScore_A (event detection, macro F1): {score_a:.4f}")
-    print(f"Score_B (accident anticipation):     {score_b:.4f}")
-    for k, v in b_details.items():
-        print(f"  {k}: {v}")
-    print(f"\nModel score M = 0.7*A + 0.3*B:       {model_score:.4f}")
+    pred = json.loads(Path(args.pred).read_text())
+    gt = json.loads(Path(args.gt).read_text()) if args.gt else None
+    if gt is None and not args.validate_only:
+        ap.error("--gt is required unless --validate-only")
+
+    errors, warnings = validate(pred, gt)
+    for w in warnings:
+        print("warning:", w)
+    for e in errors:
+        print("ERROR:", e)
+    n_events = sum(len(v.get("events", [])) for v in pred.get("videos", {}).values()) if not errors else 0
+    print(f"format: {len(pred.get('videos', {}))} video(s), {n_events} event(s), "
+          f"{len(errors)} error(s), {len(warnings)} warning(s) -> {'VALID' if not errors else 'INVALID'}")
+    if errors:
+        return 1
+    if args.validate_only:
+        return 0
+
+    print()
+    rep = evaluate(gt, pred, per_video=args.per_video)
+    print_report(rep)
+    if args.json:
+        Path(args.json).write_text(json.dumps(rep, indent=1))
+        print(f"report written to {args.json}")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

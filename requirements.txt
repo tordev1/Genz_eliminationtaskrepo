@@ -1,4 +1,7 @@
-opencv-python==4.10.0.84
+# Base deps required by the organizers' harness (numpy>=1.24, opencv-python-headless>=4.8
+# per the official requirements.txt in the starter kit) -- pinned here to exact versions
+# this repo was tested against.
+opencv-python-headless==4.10.0.84
 numpy==1.26.4
 
 # Optional upgrade path (see src/detector.py / README "Extension points").
