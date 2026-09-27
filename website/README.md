@@ -47,17 +47,33 @@ The demo currently visualizes **Part A (event detection) only**. A Part B
 risk-curve visualization in the demo is a nice-to-have, not yet built --
 the page says "risk curve visualization: coming soon."
 
-## Public hosting -- not done yet
+## Public hosting
 
-**This site and demo are not publicly hosted anywhere.** Everything above
-runs on `localhost` only. Before the submission deadline, a team member still
-needs to manually deploy this with their own account on a platform such as
-Vercel, Netlify, or Hugging Face Spaces (for the static pages) and, separately,
-somewhere that can run a small Python/Flask process for the live-demo API
-(e.g. a Hugging Face Space with a Python runtime, Render, Railway, or similar --
-static hosts like plain Netlify/Vercel cannot run the Flask backend as-is).
-Do not claim this is already deployed publicly until that step is actually
-done.
+**Deploy target: Render**, via `../render.yaml` (a "Blueprint" -- Render
+reads it and auto-configures the service, no manual settings needed):
+
+1. Push this repo to GitHub (already done: `github.com/tordev1/Genz_eliminationtaskrepo`).
+2. On [render.com](https://render.com), sign up / log in (free, no card
+   needed for a free web service) and connect your GitHub account.
+3. Dashboard -> **New** -> **Blueprint** -> pick this repo. Render detects
+   `render.yaml` at the repo root and configures the Docker build
+   (`website/Dockerfile`, build context = repo root) automatically.
+4. Deploy. Render assigns a public URL like
+   `https://genz-traffic-demo.onrender.com`.
+
+No token or credential ever needs to be shared with anyone else for this --
+it's Render's own GitHub OAuth, done entirely in your browser.
+
+**Free-tier note**: Render's free web services sleep after inactivity, so
+the first request after a quiet period takes 30-60s to wake up (the demo's
+"processing..." indicator covers this, but it's worth knowing about before
+a judge's first click looks slow).
+
+(`website/Dockerfile` also works as-is on Hugging Face Spaces' Docker SDK or
+any other platform that runs a Dockerfile and injects a `PORT` env var --
+Render was chosen because it doesn't require payment-method verification to
+unlock a Docker-backed free service, unlike HF Spaces' Docker/Gradio SDKs on
+newer accounts.)
 
 ## Files
 
@@ -68,6 +84,8 @@ done.
   table). Talks to `/api/detect_events`.
 - `demo_server.py` -- the Flask app described above.
 - `requirements.txt` -- this folder's only extra dependency (`flask`).
+- `Dockerfile` -- builds the demo for Render (or any Docker host); see
+  "Public hosting" above and `../render.yaml`.
 
 ## Known placeholders (see the page itself for the visible/marked TODOs)
 

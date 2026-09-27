@@ -209,7 +209,8 @@ tools/
   preflight.py            # local pre-submission gate (layout, harness, determinism, timing)
 tests/                   # pytest: interface, causality, format, rule-engine, tunable-loader
 examples/                # organizers' ground_truth.json / predictions.json (unmodified)
-website/                 # team site + local live demo (see website/README.md)
+website/                 # team site + live demo (Dockerfile included, see website/README.md)
+render.yaml              # one-click Render Blueprint deploy for the public demo (not part of grading)
 docs/REPORT.md           # what worked, what didn't, next steps
 docs/explainer.html       # published interactive architecture writeup
 HANDOFF.md               # independent-review brief (for a second AI/human reviewer)

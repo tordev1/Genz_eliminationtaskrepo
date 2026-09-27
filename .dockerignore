@@ -1,0 +1,11 @@
+.git
+__pycache__
+*.pyc
+.pytest_cache
+tests
+tools
+docs
+examples
+notebooks
+samples
+HANDOFF.md

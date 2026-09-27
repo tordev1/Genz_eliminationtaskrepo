@@ -1,0 +1,16 @@
+# Render "Blueprint" config -- lets Render auto-configure the demo service
+# from this repo with no manual settings (Dashboard -> New -> Blueprint ->
+# point at this repo). Only affects the public demo deployment; has no
+# effect on how the submission itself is graded (run_submission.py /
+# evaluate.py don't read this file).
+services:
+  - type: web
+    name: genz-traffic-demo
+    runtime: docker
+    dockerfilePath: ./website/Dockerfile
+    dockerContext: .
+    plan: free
+    healthCheckPath: /
+    envVars:
+      - key: PYTHONUNBUFFERED
+        value: "1"

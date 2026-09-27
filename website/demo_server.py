@@ -146,7 +146,11 @@ def detect_events_endpoint():
 
 
 if __name__ == "__main__":
+    # PORT is set by hosting platforms (Hugging Face Spaces' Docker SDK uses
+    # 7860 by default; Render/Railway inject their own PORT). Falls back to
+    # 5000 for a plain local run.
+    port = int(os.environ.get("PORT", 5000))
     print("Team Genz demo server")
     print("Repo root added to sys.path:", REPO_ROOT)
-    print("Open http://localhost:5000")
-    app.run(host="0.0.0.0", port=5000, debug=False)
+    print(f"Open http://localhost:{port}")
+    app.run(host="0.0.0.0", port=port, debug=False)

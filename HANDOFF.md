@@ -190,6 +190,12 @@ to exercise it, real footage not required for the check itself to work.
   a broken feature flag, genuinely not built.
 - **Team info in `README.md` and `website/index.html` is placeholder** --
   the user explicitly chose placeholders over guesses.
-- **The live demo is local-only** (`website/demo_server.py`, run with
-  `python website/demo_server.py`) -- public hosting (Vercel/HF
-  Spaces/etc.) has not been done.
+- **Public hosting**: `render.yaml` + `website/Dockerfile` are ready for a
+  one-click Render Blueprint deploy (see `website/README.md` "Public
+  hosting"). Chosen over Hugging Face Spaces because HF now gates its
+  Docker/Gradio SDKs behind payment-method verification on newer accounts,
+  even for the free CPU tier; Render's free web services don't require
+  that. As of this writing the actual deploy step (connecting Render to
+  the GitHub repo) is the user's to do in their own browser -- check
+  whether `website/index.html`'s Links section still has a live URL filled
+  in, or ask.
