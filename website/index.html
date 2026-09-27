@@ -5,10 +5,10 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Genz -- Traffic Camera Event Detection &amp; Accident Anticipation</title>
 <meta name="description" content="Team Genz hackathon submission: rule-based traffic event detection (Part A) and causal accident-risk anticipation (Part B) over fixed road-camera footage." />
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230f1319'/%3E%3Ccircle cx='16' cy='16' r='9' fill='none' stroke='%232a78d6' stroke-width='2.5'/%3E%3Ccircle cx='16' cy='16' r='3.4' fill='%23e34948'/%3E%3C/svg%3E" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23ffffff'/%3E%3Ccircle cx='16' cy='16' r='9' fill='none' stroke='%230071e3' stroke-width='2.5'/%3E%3Ccircle cx='16' cy='16' r='3.2' fill='%230071e3'/%3E%3C/svg%3E" />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&amp;family=Inter:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@400;500;700&amp;display=swap" rel="stylesheet" />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&amp;family=JetBrains+Mono:wght@400;500;700&amp;display=swap" rel="stylesheet" />
 <link rel="stylesheet" href="assets/style.css" />
 </head>
 <body>
@@ -32,8 +32,7 @@
 
   <!-- ============================================================ -->
   <section class="hero" id="top">
-    <div class="hero-glow" aria-hidden="true"></div>
-    <div class="section-kicker hero-kicker"><span class="rec-dot" aria-hidden="true"></span>Hackathon submission &mdash; live camera pipeline</div>
+    <div class="section-kicker hero-kicker">Hackathon submission &mdash; live camera pipeline</div>
     <h1>Genz &mdash; traffic-camera event detection &amp; accident anticipation</h1>
     <p class="lede">
       A two-part solution for the fixed-road-camera challenge: <strong>Part A</strong>
@@ -44,10 +43,12 @@
       zero-GPU, rule-based pipeline that runs on CPU out of the box, with an
       optional learned-detector upgrade path already wired in.
     </p>
-    <span class="pill">Rule-based baseline, no training data</span>
-    <span class="pill">Runs on CPU</span>
-    <span class="pill">Optional YOLO upgrade path</span>
-    <span class="pill">14 challenge classes, 8 implemented automatically</span>
+    <div class="hero-pills">
+      <span class="pill">Rule-based baseline, no training data</span>
+      <span class="pill">Runs on CPU</span>
+      <span class="pill">Optional YOLO upgrade path</span>
+      <span class="pill">14 challenge classes, 8 implemented automatically</span>
+    </div>
   </section>
 
   <!-- ============================================================ -->
