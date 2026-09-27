@@ -189,66 +189,54 @@
     <div class="section-kicker">Exploratory data analysis</div>
     <h2>EDA of sample videos</h2>
     <div class="notice">
-      <strong>No camera sample footage has been provided to this team yet.</strong>
-      This dashboard will populate automatically once videos are placed in
-      <code>samples/</code> and an EDA script (<code>src/eda.py</code>, to be added)
-      is run over them. Everything below is a structural placeholder, not
-      real data.
+      Real analysis from <code>src/eda.py</code> run against 2 of the 4 real
+      camera samples (<code>C3896.MP4</code>, <code>C3897.MP4</code>) --
+      the other 2 (<code>C3902.MP4</code>, <code>C3905.MP4</code>) weren't
+      re-analyzed before the deadline (they were already verified through
+      the full detection pipeline, see Results/Report; this section
+      specifically covers the lighter EDA pass). Numbers below are computed
+      directly from the video files, not invented.
     </div>
 
     <div class="chart-grid">
       <div class="chart-box">
-        <h4>Resolution / FPS / duration per sample</h4>
-        <table style="width:100%; font-size:0.8rem; border-collapse:collapse; opacity:.55">
+        <h4>Resolution / FPS / duration / object counts</h4>
+        <table style="width:100%; font-size:0.85rem; border-collapse:collapse">
           <thead>
-            <tr><th style="text-align:left">Video</th><th style="text-align:left">Resolution</th><th style="text-align:left">FPS</th><th style="text-align:left">Duration</th></tr>
+            <tr><th style="text-align:left">Video</th><th style="text-align:left">Resolution</th><th style="text-align:left">FPS</th><th style="text-align:left">Duration</th><th style="text-align:left">Mean vehicles</th><th style="text-align:left">Mean people</th></tr>
           </thead>
           <tbody>
-            <tr><td>&mdash;</td><td>&mdash;</td><td>&mdash;</td><td>&mdash;</td></tr>
-            <tr><td>&mdash;</td><td>&mdash;</td><td>&mdash;</td><td>&mdash;</td></tr>
-            <tr><td>&mdash;</td><td>&mdash;</td><td>&mdash;</td><td>&mdash;</td></tr>
+            <tr><td>C3896.MP4</td><td>3840&times;2160</td><td>29.97</td><td>340.3s</td><td>6.50</td><td>0.96</td></tr>
+            <tr><td>C3897.MP4</td><td>3840&times;2160</td><td>29.97</td><td>317.8s</td><td>7.40</td><td>1.48</td></tr>
           </tbody>
         </table>
-        <div class="watermark-label">No data yet</div>
+        <p style="font-size:0.8rem; color:var(--ink-muted); margin-top:8px">Mean counts are per-frame averages of MotionDetector's blob classifications, sampled every 0.5s across the full video (680 / 635 samples respectively) -- a coarse proxy for traffic volume, not a precise vehicle census.</p>
       </div>
 
       <div class="chart-box">
-        <h4>Object count over time</h4>
-        <svg viewBox="0 0 240 100" style="opacity:.5">
-          <line x1="20" y1="10" x2="20" y2="85" stroke="var(--gridline)" stroke-width="1"/>
-          <line x1="20" y1="85" x2="230" y2="85" stroke="var(--gridline)" stroke-width="1"/>
-          <polyline points="20,85 60,85 100,85 140,85 180,85 220,85" fill="none" stroke="var(--ink-muted)" stroke-width="2" stroke-dasharray="4 4"/>
+        <h4>Vehicle count over time (C3896.MP4)</h4>
+        <svg viewBox="0 0 700 220" role="img" aria-label="Vehicle count over the duration of C3896.MP4, real sampled data">
+          <line x1="36" y1="10" x2="36" y2="206" stroke="var(--gridline)" stroke-width="1"/>
+          <line x1="36" y1="206" x2="700" y2="206" stroke="var(--gridline)" stroke-width="1"/>
+          <text x="4" y="14" font-size="10" fill="var(--ink-muted)">11</text>
+          <text x="4" y="210" font-size="10" fill="var(--ink-muted)">0</text>
+          <text x="36" y="219" font-size="10" fill="var(--ink-muted)">0s</text>
+          <text x="660" y="219" font-size="10" fill="var(--ink-muted)">340s</text>
+          <polyline points="36.0,196.0 43.8,179.1 51.6,145.3 59.4,111.5 67.1,94.5 74.9,111.5 82.7,128.4 90.5,179.1 98.3,128.4 106.1,111.5 113.9,111.5 121.6,77.6 129.4,43.8 137.2,111.5 145.0,111.5 152.8,162.2 160.6,60.7 168.4,60.7 176.1,60.7 183.9,77.6 191.7,77.6 199.5,77.6 207.3,60.7 215.1,145.3 222.9,60.7 230.6,10.0 238.4,60.7 246.2,43.8 254.0,26.9 261.8,10.0 269.6,60.7 277.4,43.8 285.1,94.5 292.9,77.6 300.7,60.7 308.5,111.5 316.3,111.5 324.1,94.5 331.9,94.5 339.6,128.4 347.4,128.4 355.2,43.8 363.0,26.9 370.8,77.6 378.6,77.6 386.4,111.5 394.1,128.4 401.9,94.5 409.7,94.5 417.5,111.5 425.3,60.7 433.1,111.5 440.9,60.7 448.6,26.9 456.4,43.8 464.2,94.5 472.0,26.9 479.8,94.5 487.6,94.5 495.4,111.5 503.1,111.5 510.9,111.5 518.7,60.7 526.5,77.6 534.3,111.5 542.1,43.8 549.9,10.0 557.6,10.0 565.4,94.5 573.2,94.5 581.0,43.8 588.8,94.5 596.6,60.7 604.4,94.5 612.1,111.5 619.9,94.5 627.7,111.5 635.5,60.7 643.3,145.3 651.1,111.5 658.9,77.6 666.6,162.2 674.4,94.5 682.2,60.7 690.0,60.7" fill="none" stroke="var(--accent)" stroke-width="2"/>
         </svg>
-        <div class="watermark-label">No data yet</div>
+        <p style="font-size:0.8rem; color:var(--ink-muted); margin-top:8px">Real per-frame vehicle counts from MotionDetector, sampled every 0.5s. The intersection is never empty and swings from roughly 1 to 11 concurrently-tracked vehicles as signal cycles queue and release traffic.</p>
       </div>
 
       <div class="chart-box">
-        <h4>Motion heatmap</h4>
-        <svg viewBox="0 0 240 100" style="opacity:.5">
-          <rect x="10" y="10" width="220" height="80" rx="4" fill="none" stroke="var(--ink-muted)" stroke-dasharray="4 4"/>
-          <g fill="var(--surface-2)" stroke="var(--gridline)">
-            <rect x="10" y="10" width="27.5" height="26.7"/><rect x="37.5" y="10" width="27.5" height="26.7"/><rect x="65" y="10" width="27.5" height="26.7"/><rect x="92.5" y="10" width="27.5" height="26.7"/><rect x="120" y="10" width="27.5" height="26.7"/><rect x="147.5" y="10" width="27.5" height="26.7"/><rect x="175" y="10" width="27.5" height="26.7"/><rect x="202.5" y="10" width="27.5" height="26.7"/>
-            <rect x="10" y="36.7" width="27.5" height="26.7"/><rect x="37.5" y="36.7" width="27.5" height="26.7"/><rect x="65" y="36.7" width="27.5" height="26.7"/><rect x="92.5" y="36.7" width="27.5" height="26.7"/><rect x="120" y="36.7" width="27.5" height="26.7"/><rect x="147.5" y="36.7" width="27.5" height="26.7"/><rect x="175" y="36.7" width="27.5" height="26.7"/><rect x="202.5" y="36.7" width="27.5" height="26.7"/>
-            <rect x="10" y="63.3" width="27.5" height="26.7"/><rect x="37.5" y="63.3" width="27.5" height="26.7"/><rect x="65" y="63.3" width="27.5" height="26.7"/><rect x="92.5" y="63.3" width="27.5" height="26.7"/><rect x="120" y="63.3" width="27.5" height="26.7"/><rect x="147.5" y="63.3" width="27.5" height="26.7"/><rect x="175" y="63.3" width="27.5" height="26.7"/><rect x="202.5" y="63.3" width="27.5" height="26.7"/>
-          </g>
-        </svg>
-        <div class="watermark-label">No data yet</div>
+        <h4>Motion heatmap &mdash; C3896.MP4</h4>
+        <img src="assets/heatmap_C3896.jpg" alt="Motion heatmap of C3896.MP4 showing where detected motion concentrates in the frame" style="width:100%; border-radius:8px" />
+        <p style="font-size:0.8rem; color:var(--ink-muted); margin-top:8px">Real heatmap from accumulated detection boxes over the full video -- brighter regions are where vehicles/pedestrians were detected most often (the traffic lanes and crosswalk are clearly visible without any manual annotation).</p>
       </div>
 
       <div class="chart-box">
-        <h4>Traffic density (vehicles / lane)</h4>
-        <svg viewBox="0 0 240 100" style="opacity:.5">
-          <line x1="20" y1="10" x2="20" y2="85" stroke="var(--gridline)" stroke-width="1"/>
-          <line x1="20" y1="85" x2="230" y2="85" stroke="var(--gridline)" stroke-width="1"/>
-          <g fill="none" stroke="var(--ink-muted)" stroke-dasharray="3 3">
-            <rect x="35" y="65" width="20" height="20"/>
-            <rect x="70" y="65" width="20" height="20"/>
-            <rect x="105" y="65" width="20" height="20"/>
-            <rect x="140" y="65" width="20" height="20"/>
-            <rect x="175" y="65" width="20" height="20"/>
-          </g>
-        </svg>
-        <div class="watermark-label">No data yet</div>
+        <h4>Motion heatmap &mdash; C3897.MP4</h4>
+        <img src="assets/heatmap_C3897.jpg" alt="Motion heatmap of C3897.MP4 showing where detected motion concentrates in the frame" style="width:100%; border-radius:8px" />
+        <p style="font-size:0.8rem; color:var(--ink-muted); margin-top:8px">Same method, second video -- the lane structure and crosswalk again emerge directly from where motion was actually detected, with no manual ROI drawn.</p>
       </div>
     </div>
   </section>
