@@ -77,25 +77,46 @@ the hidden test set looks like.
   real harness twice and diffs the resulting `team`/`videos` content to check
   determinism, all currently green.
 
-## What did not work / limitations
+## What we found once real footage arrived (late in the timeline, ~2h before deadline)
 
-- **No real sample footage is in the repo yet.** `Videos.pdf` (from the
-  organizers) links to 4 real camera clips on Google Drive; every download
-  attempt so far has hit Google Drive's "too many users have viewed or
-  downloaded this file recently" throttle (a shared, host-side rate limit
-  on these specific file IDs -- not a permissions problem, and not fixed by
-  retrying quickly). Until they land in `samples/`, there is: no real EDA,
-  no real annotated website outputs, and **no way to tune any threshold in
-  `src/rules.py` / `src/risk.py` against real ground truth.** Every
-  constant is a reasoned default, not a fitted one. This is the single
-  biggest gap between this baseline and a competitive score, and the
-  tooling to close it the moment footage arrives already exists and is
-  tested (`tools/annotate.html`, `tools/tune_thresholds.py`).
-- **What we could not verify**: the harness's behavior on a real, several-
-  minutes-long, 1080p clip (typical per the spec) -- everything above was
-  timed against a 12s synthetic clip. The perf fixes in "What worked" #4
-  above are targeted at exactly this gap, but they're reasoned, not
-  measured against real footage yet.
+The 4 real camera clips eventually downloaded (2-6GB each, 4K, ~30fps,
+127-340s -- a fixed elevated view of a busy multi-lane signalized
+intersection with a crosswalk). Running the actual pipeline against them
+for the first time surfaced problems no synthetic test caught:
+
+- **Performance was the single most serious finding.** `MotionDetector`
+  ran background subtraction at native 4K: 733ms/frame, which alone
+  (before tracking or rules) exceeded the 3x-duration time budget --
+  every video would have scored as empty. Fixed by always downscaling
+  internally to a fixed 960px processing width before detection and
+  scaling boxes back up (calibrated thresholds now apply consistently
+  across any input resolution, not just faster): 42ms/frame, a **17x**
+  speedup. A 127.6s real video went from 1887.6s (4.9x over its 382.9s
+  budget) to 96.8s (well within it).
+- **`wrong_way` was structurally broken on a real divided road.** It
+  compared every vehicle against one scene-wide average direction; a
+  two-way avenue's legal opposing-carriageway traffic averages into an
+  unstable direction and gets flagged. Replaced with a spatial-grid local
+  direction model (`src/road_model.py`) -- a vehicle is now compared
+  against nearby same-lane traffic. Two regression tests added.
+- **`accident`/`failure_to_yield`/`near_miss`/`jaywalking` all had real
+  false-positive modes**, confirmed empirically (one 127.6s real video:
+  49 spurious events before fixes, 26 after): a `jaywalking` event
+  spanning the entire video (RoadModel's on-road hull is broader than the
+  carriageway; capped and gated on actual displacement), `near_miss`
+  events lasting up to 54s (was reporting the whole proximity window
+  instead of the evasive episode; now ends shortly after the last
+  high-closing-speed sample), and `accident`/`failure_to_yield` firing on
+  ordinary adjacent-lane visual overlap from the elevated camera angle
+  (IoU threshold raised from 0.02 to 0.1, a reasoned bump, not
+  empirically grid-searched -- see below).
+- **Not fully solved**: given the ~2 hour window between real footage
+  landing and the submission deadline, there was no time to run
+  `tools/tune_thresholds.py`'s full grid search against a real annotated
+  dev set, or to build proper crosswalk/carriageway-aware exclusion for
+  `jaywalking`. The false-positive rate above is reduced, not eliminated
+  -- an honest, measured state, not a claimed fix. This is the top item
+  in "Next steps."
 - **Six classes have no automatic signal**: `red_light`, `stop_line`,
   `illegal_u_turn`, `illegal_turn`, `solid_line_crossing`, `fire_smoke`.
   Each needs information a camera-agnostic motion pipeline doesn't have --
@@ -118,7 +139,7 @@ the hidden test set looks like.
 
 ## Validators
 
-- `pytest tests/` -- 31 cases: interface exactness against
+- `pytest tests/` -- 32 cases: interface exactness against
   `evaluate.OFFICIAL_CLASSES`, a structural (source + AST) check that
   Part B's call graph never references `cv2.VideoCapture`, format tests run
   through the actual official `evaluate.validate()`, rule-engine unit tests
@@ -134,16 +155,22 @@ the hidden test set looks like.
 
 ## Next steps (priority order)
 
-1. Get the 4 real camera samples into `samples/` (currently blocked on
-   Google Drive's throttle -- see "What did not work"); hand-annotate them
-   with `tools/annotate.html` into a dev `ground_truth.json` using the
-   exact conventions in the challenge's "Event classes" table.
-2. Run `tools/tune_thresholds.py --part a` and `--part b` against that dev
-   set and commit the resulting `tuned_params.json` -- expected to move
-   Score_A more than any single remaining architectural change.
+1. Hand-annotate the 4 real samples (now in `samples/`) with
+   `tools/annotate.html` into a dev `ground_truth.json`, then run
+   `tools/tune_thresholds.py --part a` and `--part b` against it and commit
+   the resulting `tuned_params.json` -- the false-positive rate documented
+   above (26 events on one real video with zero true events, per manual
+   frame-sampled review) is the clearest remaining gap, and this is a
+   grid search away from being data-driven instead of hand-picked, once
+   there's time to run it.
+2. Build proper crosswalk/carriageway-aware exclusion for `jaywalking`
+   (RoadModel's on-road hull is currently broader than the actual
+   carriageway) instead of the current duration-cap stopgap.
 3. Swap in `YoloDetector` (already wired) once `weights/yolov8n.pt` is
    downloaded; re-measure `jaywalking` / `failure_to_yield` / `accident`
-   precision specifically.
+   precision specifically -- real object-class labels instead of
+   size/aspect-ratio guessing should directly address several of the
+   false-positive modes found above.
 4. Wire `CalibrationConfig` into `detect_events` / `build_events` and write
    the five rule functions it would drive, once a real camera calibration
    (stop line, signal ROI, lane geometry) exists to validate them against.
