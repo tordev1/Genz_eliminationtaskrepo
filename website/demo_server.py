@@ -108,7 +108,9 @@ def detect_events_endpoint():
             tmp_path = tmp_file.name
 
         duration = _probe_duration_sec(tmp_path)
-        if duration is not None and duration > MAX_DURATION_SEC:
+        # +1.0s tolerance: frame-count/fps duration probing is approximate, so
+        # a clip meant to be exactly at the limit can probe a hair over it.
+        if duration is not None and duration > MAX_DURATION_SEC + 1.0:
             return (
                 jsonify(
                     {
