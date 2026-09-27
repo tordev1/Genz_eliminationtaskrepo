@@ -1,0 +1,480 @@
+<!-- published via Artifact tool --><title>Genz Traffic Pipeline</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap');
+
+  :root{
+    --bg:#eef1ef;
+    --bg-raised:#ffffff;
+    --ink:#1a231f;
+    --ink-dim:#5b6864;
+    --line:#c9d2ce;
+    --amber:#c97a1f;
+    --amber-soft:#f3e2c8;
+    --teal:#1f7a70;
+    --teal-soft:#d9ece8;
+    --red:#a83c34;
+    --red-soft:#f3ddd9;
+    --gray-chip:#e2e6e3;
+    --code-bg:#e6e9e6;
+    --shadow: 0 1px 2px rgba(20,30,25,0.06), 0 6px 16px rgba(20,30,25,0.05);
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --bg:#141b18;
+      --bg-raised:#1b241f;
+      --ink:#e9efec;
+      --ink-dim:#a3b0ab;
+      --line:#33413b;
+      --amber:#e0a24a;
+      --amber-soft:#3a2d18;
+      --teal:#5cbcaf;
+      --teal-soft:#1c332f;
+      --red:#e08a80;
+      --red-soft:#3a2220;
+      --gray-chip:#25302b;
+      --code-bg:#101613;
+      --shadow: 0 1px 2px rgba(0,0,0,0.3), 0 8px 20px rgba(0,0,0,0.35);
+    }
+  }
+  :root[data-theme="dark"]{
+    --bg:#141b18;
+    --bg-raised:#1b241f;
+    --ink:#e9efec;
+    --ink-dim:#a3b0ab;
+    --line:#33413b;
+    --amber:#e0a24a;
+    --amber-soft:#3a2d18;
+    --teal:#5cbcaf;
+    --teal-soft:#1c332f;
+    --red:#e08a80;
+    --red-soft:#3a2220;
+    --gray-chip:#25302b;
+    --code-bg:#101613;
+    --shadow: 0 1px 2px rgba(0,0,0,0.3), 0 8px 20px rgba(0,0,0,0.35);
+  }
+
+  *{box-sizing:border-box;}
+  body{
+    margin:0; background:var(--bg); color:var(--ink);
+    font-family:'IBM Plex Sans', system-ui, sans-serif;
+    font-size:15.5px; line-height:1.55;
+    padding-inline:16px;
+  }
+  a{color:var(--teal);}
+  .wrap{max-width:1080px; margin:0 auto;}
+
+  h1,h2,h3{
+    font-family:'Barlow Condensed', system-ui, sans-serif;
+    text-transform:uppercase; letter-spacing:0.02em;
+    text-wrap:balance; color:var(--ink);
+  }
+  code, .mono{font-family:'IBM Plex Mono', monospace;}
+
+  /* ---------- header / masthead ---------- */
+  .masthead{
+    padding-block:28px 20px;
+    border-bottom:3px solid var(--ink);
+    display:flex; flex-wrap:wrap; gap:16px 28px; align-items:flex-end; justify-content:space-between;
+  }
+  .masthead .id{display:flex; align-items:baseline; gap:14px; flex-wrap:wrap;}
+  .masthead h1{font-size:clamp(28px,5vw,44px); font-weight:700; margin:0; line-height:0.95;}
+  .masthead .sub{font-size:13px; color:var(--ink-dim); font-family:'IBM Plex Mono',monospace; letter-spacing:0.03em;}
+  .plate{
+    font-family:'IBM Plex Mono', monospace; font-size:12px; letter-spacing:0.06em;
+    border:1.5px solid var(--ink); border-radius:3px; padding:5px 10px;
+    background:var(--amber-soft); color:var(--ink); white-space:nowrap;
+  }
+  .masthead-meta{font-family:'IBM Plex Mono',monospace; font-size:12px; color:var(--ink-dim); text-align:right;}
+
+  /* ---------- nav rail ---------- */
+  nav.toc{
+    display:flex; gap:6px; flex-wrap:wrap;
+    padding-block:14px; border-bottom:1px solid var(--line);
+    position:sticky; top:env(safe-area-inset-top,0px); background:var(--bg); z-index:5;
+  }
+  nav.toc a{
+    font-family:'IBM Plex Mono',monospace; font-size:12px; text-decoration:none; color:var(--ink-dim);
+    padding:6px 10px; border:1px solid var(--line); border-radius:20px; background:var(--bg-raised);
+  }
+  nav.toc a:hover{color:var(--teal); border-color:var(--teal);}
+
+  section{padding-block:34px; border-bottom:1px solid var(--line); scroll-margin-top:70px;}
+  section:last-of-type{border-bottom:none;}
+  .eyebrow{
+    font-family:'IBM Plex Mono',monospace; font-size:11.5px; letter-spacing:0.12em; text-transform:uppercase;
+    color:var(--teal); margin:0 0 6px;
+  }
+  h2{font-size:26px; margin:0 0 6px;}
+  .lede{color:var(--ink-dim); max-width:62ch; margin:0 0 22px; font-size:15px;}
+
+  /* ---------- status chips ---------- */
+  .chip{
+    display:inline-flex; align-items:center; gap:6px;
+    font-family:'IBM Plex Mono',monospace; font-size:11.5px; letter-spacing:0.02em;
+    padding:3px 9px; border-radius:20px; font-weight:500;
+  }
+  .chip.live{background:var(--teal-soft); color:var(--teal);}
+  .chip.pending{background:var(--gray-chip); color:var(--ink-dim);}
+  .chip.risk{background:var(--red-soft); color:var(--red);}
+  .chip::before{content:''; width:6px; height:6px; border-radius:50%; background:currentColor; flex:none;}
+
+  /* ---------- cards / grid ---------- */
+  .grid2{display:grid; grid-template-columns:1fr 1fr; gap:18px;}
+  .grid3{display:grid; grid-template-columns:repeat(3,1fr); gap:14px;}
+  @media (max-width:760px){ .grid2, .grid3{grid-template-columns:1fr;} }
+
+  .card{
+    background:var(--bg-raised); border:1px solid var(--line); border-radius:8px;
+    padding:18px 20px; box-shadow:var(--shadow);
+  }
+  .card h3{font-size:15px; margin:0 0 8px; letter-spacing:0.03em;}
+  .card p{margin:0; color:var(--ink-dim); font-size:14px;}
+  .stat{
+    font-family:'IBM Plex Mono',monospace; font-weight:500; font-size:28px; color:var(--ink);
+    line-height:1; margin-bottom:4px;
+  }
+  .stat + .stat-label{font-size:12px; color:var(--ink-dim); text-transform:uppercase; letter-spacing:0.06em;}
+
+  /* ---------- diagrams ---------- */
+  figure{margin:18px 0 0;}
+  figure svg{max-width:100%; height:auto; display:block; background:var(--bg-raised); border:1px solid var(--line); border-radius:8px;}
+  figcaption{font-size:12.5px; color:var(--ink-dim); margin-top:8px; font-family:'IBM Plex Mono',monospace;}
+  .diagram-wrap{overflow-x:auto;}
+
+  /* ---------- table ---------- */
+  .tbl-wrap{overflow-x:auto; border:1px solid var(--line); border-radius:8px;}
+  table{border-collapse:collapse; width:100%; min-width:640px; font-size:13.5px; background:var(--bg-raised);}
+  thead th{
+    text-align:left; font-family:'IBM Plex Mono',monospace; font-size:11px; letter-spacing:0.06em; text-transform:uppercase;
+    color:var(--ink-dim); padding:10px 14px; border-bottom:1px solid var(--line);
+  }
+  tbody td{padding:10px 14px; border-bottom:1px solid var(--line); vertical-align:top;}
+  tbody tr:last-child td{border-bottom:none;}
+  tbody td:first-child{font-family:'IBM Plex Mono',monospace; font-weight:500;}
+
+  /* ---------- formula panel ---------- */
+  .formula{
+    font-family:'IBM Plex Mono',monospace; background:var(--code-bg); border:1px solid var(--line);
+    border-radius:8px; padding:14px 18px; font-size:13.5px; overflow-x:auto; white-space:pre;
+  }
+  .formula .k{color:var(--teal);}
+  .formula .v{color:var(--amber);}
+
+  ul.plain{margin:0; padding:0; list-style:none;}
+  ul.plain li{padding:6px 0 6px 20px; position:relative; color:var(--ink-dim); font-size:14.5px;}
+  ul.plain li::before{content:'—'; position:absolute; left:0; color:var(--teal);}
+  ul.plain b{color:var(--ink); font-weight:600;}
+
+  .callout{
+    border-left:3px solid var(--amber); background:var(--amber-soft); border-radius:0 8px 8px 0;
+    padding:14px 18px; font-size:14px; color:var(--ink);
+  }
+  .callout b{color:var(--ink);}
+
+  footer{padding-block:26px 40px; color:var(--ink-dim); font-size:12.5px; font-family:'IBM Plex Mono',monospace;}
+</style>
+
+<div class="wrap">
+
+  <div class="masthead">
+    <div class="id">
+      <h1>Genz</h1>
+      <span class="plate">TRAFFIC-CAM PIPELINE</span>
+    </div>
+    <div class="masthead-meta">
+      Part A: event detection · Part B: accident anticipation<br>
+      rule-based baseline · no training data required
+    </div>
+  </div>
+
+  <nav class="toc">
+    <a href="#tldr">TL;DR</a>
+    <a href="#scoring">How it's scored</a>
+    <a href="#arch-a">Part A pipeline</a>
+    <a href="#arch-b">Part B pipeline</a>
+    <a href="#classes">Class coverage</a>
+    <a href="#repo">Repo map</a>
+    <a href="#status">Status &amp; limits</a>
+  </nav>
+
+  <section id="tldr">
+    <p class="eyebrow">01 — Overview</p>
+    <h2>What this system does</h2>
+    <p class="lede">A fixed CCTV road camera goes in. Two outputs come out: a timestamped list of traffic events, and — frame by frame, as the video plays — a rising-or-falling number that says how likely an accident is about to happen.</p>
+
+    <div class="grid3">
+      <div class="card">
+        <div class="stat">14</div>
+        <div class="stat-label">Official event classes</div>
+        <p style="margin-top:10px">From <code>accident</code> and <code>wrong_way</code> to <code>fire_smoke</code>. Every clip gets scored against a hidden, human-annotated set of these.</p>
+      </div>
+      <div class="card">
+        <div class="stat">8 / 14</div>
+        <div class="stat-label">Classes automated today</div>
+        <p style="margin-top:10px">Detector + tracker + hand-written rules, with no calibration step. The rest need per-camera calibration we don't have yet — see <a href="#classes">Class coverage</a>.</p>
+      </div>
+      <div class="card">
+        <div class="stat">0</div>
+        <div class="stat-label">GPUs / labels required</div>
+        <p style="margin-top:10px">The default pipeline is classical computer vision (background subtraction). A learned detector is a documented, optional upgrade.</p>
+      </div>
+    </div>
+  </section>
+
+  <section id="scoring">
+    <p class="eyebrow">02 — Evaluation</p>
+    <h2>How the hidden test set scores a submission</h2>
+    <p class="lede">Two independent scores, blended into one number. Understanding the formula is what tells you which mistakes actually cost points.</p>
+
+    <div class="grid2">
+      <div class="card">
+        <h3>Score A — event detection (70%)</h3>
+        <p>For each class, at IoU thresholds 0.3 / 0.5 / 0.7, match predicted segments to ground truth by overlap. Unmatched predictions are false positives; unmatched ground truth is a miss.</p>
+        <div class="formula" style="margin-top:12px"><span class="k">Score_A</span> = mean over classes(
+  mean over τ∈{0.3,0.5,0.7}(
+    <span class="v">F1</span>(class, τ)
+  )
+)</div>
+      </div>
+      <div class="card">
+        <h3>Score B — accident anticipation (30%, bonus)</h3>
+        <p>Only accident events count. A risk curve is scored on ranking quality (AP), whether its alarms line up with real accidents (F1), and how early the alarm fires (mTTA).</p>
+        <div class="formula" style="margin-top:12px"><span class="k">Score_B</span> = 0.4·<span class="v">AP</span>
+        + 0.4·<span class="v">F1_alarm</span>
+        + 0.2·(<span class="v">mTTA</span>/10s)</div>
+      </div>
+    </div>
+
+    <div class="callout" style="margin-top:18px">
+      <b>Why boundaries matter more than they look:</b> reporting a 5-second crash as the whole minute around it fails IoU ≥ 0.3 against most real ground-truth segments. Tight start/end timing is worth more than catching the event at all.
+    </div>
+
+    <p style="margin-top:18px"><span class="chip risk" style="margin-right:8px">calibration tip</span><span class="ink-dim" style="color:var(--ink-dim); font-size:14px">A risk score of <b>0.5</b> is defined to mean "an accident is about to start within the 5-second horizon." <code>src/risk.py</code>'s time-to-collision term is calibrated directly to that point.</span></p>
+  </section>
+
+  <section id="arch-a">
+    <p class="eyebrow">03 — Architecture</p>
+    <h2>Part A — offline event detection</h2>
+    <p class="lede">Runs once per video, with the whole clip available. Every finished vehicle/person track gets checked against eight rules; matching stretches of time become events.</p>
+
+    <div class="diagram-wrap">
+    <figure>
+      <svg viewBox="0 0 980 260" role="img" aria-label="Part A pipeline: video frames flow through a motion detector, an IoU tracker, and a road model, into a rule engine that outputs event segments per class.">
+        <defs>
+          <marker id="arrA" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
+          </marker>
+        </defs>
+        <g font-family="IBM Plex Mono, monospace" font-size="12" fill="currentColor">
+          <!-- stage boxes -->
+          <g>
+            <rect x="20" y="90" width="130" height="70" rx="6" fill="none" stroke="currentColor" stroke-width="1.5"/>
+            <text x="85" y="118" text-anchor="middle" font-weight="600">video.mp4</text>
+            <text x="85" y="136" text-anchor="middle" fill="var(--ink-dim)" font-size="10.5">sampled ~12 fps</text>
+          </g>
+
+          <line x1="150" y1="125" x2="200" y2="125" stroke="currentColor" stroke-width="1.5" marker-end="url(#arrA)"/>
+
+          <g>
+            <rect x="205" y="80" width="150" height="90" rx="6" fill="none" stroke="currentColor" stroke-width="1.5"/>
+            <text x="280" y="108" text-anchor="middle" font-weight="600">Detector</text>
+            <text x="280" y="126" text-anchor="middle" fill="var(--ink-dim)" font-size="10.5">MOG2 motion blobs</text>
+            <text x="280" y="141" text-anchor="middle" fill="var(--ink-dim)" font-size="10.5">→ vehicle / person</text>
+            <text x="280" y="156" text-anchor="middle" fill="var(--teal)" font-size="10">(optional: YOLO)</text>
+          </g>
+
+          <line x1="355" y1="125" x2="405" y2="125" stroke="currentColor" stroke-width="1.5" marker-end="url(#arrA)"/>
+
+          <g>
+            <rect x="410" y="80" width="150" height="90" rx="6" fill="none" stroke="currentColor" stroke-width="1.5"/>
+            <text x="485" y="108" text-anchor="middle" font-weight="600">IoU Tracker</text>
+            <text x="485" y="126" text-anchor="middle" fill="var(--ink-dim)" font-size="10.5">greedy box matching</text>
+            <text x="485" y="141" text-anchor="middle" fill="var(--ink-dim)" font-size="10.5">keeps (t, x, y, w, h)</text>
+            <text x="485" y="156" text-anchor="middle" fill="var(--ink-dim)" font-size="10.5">per track</text>
+          </g>
+
+          <line x1="485" y1="170" x2="485" y2="200" stroke="currentColor" stroke-width="1.5" marker-end="url(#arrA)"/>
+          <g>
+            <rect x="380" y="205" width="210" height="46" rx="6" fill="var(--teal-soft)" stroke="var(--teal)" stroke-width="1.5"/>
+            <text x="485" y="224" text-anchor="middle" font-weight="600" fill="var(--teal)">Road Model</text>
+            <text x="485" y="239" text-anchor="middle" fill="var(--teal)" font-size="10.5">hull + dominant flow direction</text>
+          </g>
+
+          <line x1="560" y1="125" x2="615" y2="125" stroke="currentColor" stroke-width="1.5" marker-end="url(#arrA)"/>
+          <line x1="590" y1="205" x2="640" y2="150" stroke="var(--teal)" stroke-width="1.5" marker-end="url(#arrA)"/>
+
+          <g>
+            <rect x="620" y="70" width="180" height="110" rx="6" fill="none" stroke="currentColor" stroke-width="1.5"/>
+            <text x="710" y="96" text-anchor="middle" font-weight="600">Rule Engine</text>
+            <text x="710" y="113" text-anchor="middle" fill="var(--ink-dim)" font-size="10">stopped_vehicle · congestion</text>
+            <text x="710" y="127" text-anchor="middle" fill="var(--ink-dim)" font-size="10">wrong_way · accident</text>
+            <text x="710" y="141" text-anchor="middle" fill="var(--ink-dim)" font-size="10">near_miss · road_obstacle</text>
+            <text x="710" y="155" text-anchor="middle" fill="var(--ink-dim)" font-size="10">jaywalking · failure_to_yield</text>
+            <text x="710" y="171" text-anchor="middle" fill="var(--amber)" font-size="10">(+6 gated on calibration.json)</text>
+          </g>
+
+          <line x1="800" y1="125" x2="850" y2="125" stroke="currentColor" stroke-width="1.5" marker-end="url(#arrA)"/>
+
+          <g>
+            <rect x="855" y="95" width="110" height="60" rx="6" fill="var(--amber-soft)" stroke="var(--amber)" stroke-width="1.5"/>
+            <text x="910" y="120" text-anchor="middle" font-weight="600" fill="var(--amber)">events[]</text>
+            <text x="910" y="136" text-anchor="middle" fill="var(--amber)" font-size="9.5">[start,end,label]</text>
+          </g>
+        </g>
+      </svg>
+      <figcaption>Fig. 1 — solution.detect_events(): one pass over the whole video, tracks-to-rules, per class.</figcaption>
+    </figure>
+    </div>
+  </section>
+
+  <section id="arch-b">
+    <p class="eyebrow">03 — Architecture, continued</p>
+    <h2>Part B — causal accident risk</h2>
+    <p class="lede">The harness hands over one frame at a time, in order. Nothing downstream is allowed to see a frame before its timestamp arrives — that's what makes an early-warning score meaningful.</p>
+
+    <div class="diagram-wrap">
+    <figure>
+      <svg viewBox="0 0 980 220" role="img" aria-label="Part B pipeline: each frame passes through the same detector and tracker, updating a running road model, and three signals (time to collision, hard braking, pedestrian proximity) combine into one smoothed risk score, with a strict boundary preventing any future frame from being used.">
+        <defs>
+          <marker id="arrB" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
+          </marker>
+        </defs>
+        <g font-family="IBM Plex Mono, monospace" font-size="12" fill="currentColor">
+          <rect x="14" y="18" width="290" height="184" rx="8" fill="none" stroke="var(--red)" stroke-width="1.5" stroke-dasharray="5 4"/>
+          <text x="28" y="38" fill="var(--red)" font-size="10.5" font-weight="600">FUTURE — NEVER READ</text>
+
+          <g>
+            <rect x="30" y="80" width="120" height="60" rx="6" fill="none" stroke="currentColor" stroke-width="1.5" opacity="0.45"/>
+            <text x="90" y="105" text-anchor="middle" opacity="0.55">frame t+1…</text>
+            <text x="90" y="120" text-anchor="middle" opacity="0.55" font-size="10">(inaccessible)</text>
+          </g>
+          <line x1="150" y1="110" x2="180" y2="110" stroke="var(--red)" stroke-width="2"/>
+          <line x1="165" y1="98" x2="180" y2="122" stroke="var(--red)" stroke-width="2"/>
+          <line x1="165" y1="122" x2="180" y2="98" stroke="var(--red)" stroke-width="2"/>
+
+          <line x1="304" y1="110" x2="360" y2="110" stroke="currentColor" stroke-width="1.5" marker-end="url(#arrB)"/>
+
+          <g>
+            <rect x="365" y="55" width="150" height="110" rx="6" fill="none" stroke="currentColor" stroke-width="1.5"/>
+            <text x="440" y="80" text-anchor="middle" font-weight="600">frame t</text>
+            <text x="440" y="96" text-anchor="middle" fill="var(--ink-dim)" font-size="10">Detector + Tracker</text>
+            <text x="440" y="110" text-anchor="middle" fill="var(--ink-dim)" font-size="10">(fresh state per video,</text>
+            <text x="440" y="123" text-anchor="middle" fill="var(--ink-dim)" font-size="10">rebuilt in reset())</text>
+            <text x="440" y="141" text-anchor="middle" fill="var(--teal)" font-size="10">Road Model (running)</text>
+          </g>
+
+          <line x1="515" y1="110" x2="565" y2="110" stroke="currentColor" stroke-width="1.5" marker-end="url(#arrB)"/>
+
+          <g>
+            <rect x="570" y="18" width="160" height="42" rx="6" fill="none" stroke="currentColor" stroke-width="1.2"/>
+            <text x="650" y="43" text-anchor="middle" font-size="11">time-to-collision</text>
+            <rect x="570" y="66" width="160" height="42" rx="6" fill="none" stroke="currentColor" stroke-width="1.2"/>
+            <text x="650" y="91" text-anchor="middle" font-size="11">hard braking</text>
+            <rect x="570" y="114" width="160" height="42" rx="6" fill="none" stroke="currentColor" stroke-width="1.2"/>
+            <text x="650" y="139" text-anchor="middle" font-size="11">pedestrian near vehicle</text>
+          </g>
+
+          <line x1="730" y1="39" x2="775" y2="90" stroke="currentColor" stroke-width="1.2" marker-end="url(#arrB)"/>
+          <line x1="730" y1="87" x2="775" y2="90" stroke="currentColor" stroke-width="1.2" marker-end="url(#arrB)"/>
+          <line x1="730" y1="135" x2="775" y2="90" stroke="currentColor" stroke-width="1.2" marker-end="url(#arrB)"/>
+
+          <g>
+            <rect x="780" y="60" width="70" height="60" rx="6" fill="var(--gray-chip)" stroke="currentColor" stroke-width="1.2"/>
+            <text x="815" y="86" text-anchor="middle" font-size="11" font-weight="600">max()</text>
+            <text x="815" y="102" text-anchor="middle" font-size="9.5" fill="var(--ink-dim)">+ EMA</text>
+          </g>
+
+          <line x1="850" y1="90" x2="895" y2="90" stroke="currentColor" stroke-width="1.5" marker-end="url(#arrB)"/>
+          <g>
+            <rect x="898" y="65" width="68" height="50" rx="6" fill="var(--red-soft)" stroke="var(--red)" stroke-width="1.5"/>
+            <text x="932" y="86" text-anchor="middle" fill="var(--red)" font-weight="600" font-size="11">risk</text>
+            <text x="932" y="100" text-anchor="middle" fill="var(--red)" font-size="9.5">∈ [0,1]</text>
+          </g>
+        </g>
+      </svg>
+      <figcaption>Fig. 2 — RiskEstimator.step(): one frame in, one score out; the crossed-out arrow is the rule the code enforces structurally, not by convention.</figcaption>
+    </figure>
+    </div>
+  </section>
+
+  <section id="classes">
+    <p class="eyebrow">04 — Coverage</p>
+    <h2>Which of the 14 classes actually fire today</h2>
+    <p class="lede">Eight classes have a genuine, camera-agnostic signal. Six need information this pipeline doesn't have yet — a calibrated stop line, signal state, or lane geometry — so they're wired as an off switch rather than a guess.</p>
+
+    <div class="tbl-wrap">
+      <table>
+        <thead><tr><th>Class</th><th>Status</th><th>Signal</th></tr></thead>
+        <tbody>
+          <tr><td>stopped_vehicle</td><td><span class="chip live">automatic</span></td><td>speed ≤ threshold, sustained ≥ 10s</td></tr>
+          <tr><td>congestion</td><td><span class="chip live">automatic</span></td><td>≥3 vehicle tracks, ≥70% near-stationary, ≥ 8s</td></tr>
+          <tr><td>wrong_way</td><td><span class="chip live">automatic</span></td><td>heading ≥135° vs. dominant flow direction</td></tr>
+          <tr><td>accident</td><td><span class="chip live">automatic</span></td><td>bounding-box overlap between two tracks</td></tr>
+          <tr><td>near_miss</td><td><span class="chip live">automatic</span></td><td>close approach + high closing speed, no contact</td></tr>
+          <tr><td>road_obstacle</td><td><span class="chip live">automatic</span></td><td>static unclassified blob on the road, ≥ 10s</td></tr>
+          <tr><td>jaywalking</td><td><span class="chip live">automatic</span></td><td>person-blob inside road-model polygon</td></tr>
+          <tr><td>failure_to_yield</td><td><span class="chip live">automatic</span></td><td>vehicle–person bounding-box overlap</td></tr>
+          <tr><td>red_light</td><td><span class="chip pending">needs calibration</span></td><td>stop line + signal-state ROI, not yet available</td></tr>
+          <tr><td>stop_line</td><td><span class="chip pending">needs calibration</span></td><td>stop line ROI, not yet available</td></tr>
+          <tr><td>illegal_u_turn</td><td><span class="chip pending">needs calibration</span></td><td>no-U-turn zone geometry, not yet available</td></tr>
+          <tr><td>illegal_turn</td><td><span class="chip pending">needs calibration</span></td><td>lane/turn geometry, not yet available</td></tr>
+          <tr><td>solid_line_crossing</td><td><span class="chip pending">needs calibration</span></td><td>lane-marking geometry, not yet available</td></tr>
+          <tr><td>fire_smoke</td><td><span class="chip pending">needs calibration</span></td><td>motion blobs alone lack reliable color/texture cues</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p style="font-size:13px; color:var(--ink-dim); margin-top:10px">Full schema for calibration in <code>src/rules.py:CalibrationConfig</code> / <code>examples/calibration.example.json</code>.</p>
+  </section>
+
+  <section id="repo">
+    <p class="eyebrow">05 — Repository</p>
+    <h2>What's in the repo, and why</h2>
+    <div class="grid2">
+      <div class="card">
+        <h3>Required interface</h3>
+        <ul class="plain">
+          <li><b>solution.py</b> — <code>detect_events()</code>, <code>RiskEstimator</code></li>
+          <li><b>run_submission.py</b> — folder of videos → predictions.json, one process per video so the time budget can actually be enforced</li>
+          <li><b>evaluate.py</b> — format check + Score A / Score B / model score, re-derived from the spec and checked against hand-built examples</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>Pipeline code (src/)</h3>
+        <ul class="plain">
+          <li><b>detector.py</b> — MOG2 motion detector (default) + optional YOLO</li>
+          <li><b>tracker.py</b> — greedy IoU multi-object tracker</li>
+          <li><b>road_model.py</b> — hull + dominant flow, shared by A and B</li>
+          <li><b>rules.py</b> / <b>risk.py</b> — the two rule sets above</li>
+          <li><b>eda.py</b> — runs the moment real samples exist</li>
+        </ul>
+      </div>
+    </div>
+    <div class="card" style="margin-top:14px">
+      <h3>Also required by the brief</h3>
+      <p><b>website/</b> — team page, approach, EDA, live local demo, report (placeholders marked where real data doesn't exist yet). <b>docs/REPORT.md</b> — full write-up: what worked, what didn't, next steps.</p>
+    </div>
+  </section>
+
+  <section id="status">
+    <p class="eyebrow">06 — Honesty check</p>
+    <h2>Status, in one place</h2>
+    <div class="grid3">
+      <div class="card">
+        <h3 style="color:var(--teal)">Verified working</h3>
+        <p>detect_events and RiskEstimator run end-to-end on a real .mp4 without crashing, inside the 3× time budget on CPU. The harness and evaluator were checked against hand-built ground truth and reproduce the spec's F1/AP/alarm formulas exactly.</p>
+      </div>
+      <div class="card">
+        <h3 style="color:var(--amber)">Not yet tuned</h3>
+        <p>Every threshold (10s dwell, 135° heading, IoU-overlap, TTC scaling) is a reasoned default, not a fitted one — there is no real camera footage or ground truth to tune against yet.</p>
+      </div>
+      <div class="card">
+        <h3 style="color:var(--red)">Open gaps</h3>
+        <p>6 classes need calibration data. Vehicle/person split is a geometry guess without a real detector. Accident/near_miss use 2D box overlap with no depth cue.</p>
+      </div>
+    </div>
+    <p style="margin-top:16px; font-size:14px; color:var(--ink-dim)">Full detail in <code>docs/REPORT.md</code> — including the ranked next-steps list (get real samples → annotate a dev set → retune against <code>evaluate.py</code> → swap in YOLO → calibrate the remaining 6 classes).</p>
+  </section>
+
+  <footer>Genz · Team Website: <code>website/index.html</code> · Report: <code>docs/REPORT.md</code> · Repo: <code>Genz_eliminationtaskrepo</code></footer>
+</div>

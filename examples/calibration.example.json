@@ -1,0 +1,8 @@
+{
+  "_comment": "Optional. Copy to '<video_name>.calibration.json' next to a video to enable red_light/stop_line/illegal_u_turn/illegal_turn/solid_line_crossing (see src/rules.py:CalibrationConfig). All coordinates are pixel (x, y) in the video's native resolution.",
+  "stop_line": [[120, 400], [640, 400]],
+  "signal_roi": [600, 50, 40, 90],
+  "no_u_turn_zones": [[[200, 300], [400, 300], [400, 380], [200, 380]]],
+  "solid_lines": [[[0, 350], [1280, 350]]],
+  "crosswalks": [[[100, 420], [500, 420], [500, 460], [100, 460]]]
+}

@@ -1,0 +1,440 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Genz -- Traffic Camera Event Detection &amp; Accident Anticipation</title>
+<meta name="description" content="Team Genz hackathon submission: rule-based traffic event detection (Part A) and causal accident-risk anticipation (Part B) over fixed road-camera footage." />
+<link rel="stylesheet" href="assets/style.css" />
+</head>
+<body>
+
+<header class="site-nav">
+  <div class="nav-inner">
+    <span class="brand">Genz<span class="dot">.</span></span>
+    <nav class="links">
+      <a href="#team">Team</a>
+      <a href="#approach">Problem &amp; Approach</a>
+      <a href="#eda">EDA</a>
+      <a href="#results">Results</a>
+      <a href="#demo">Live Demo</a>
+      <a href="#report">Report</a>
+      <a href="#links">Links</a>
+    </nav>
+  </div>
+</header>
+
+<main class="container">
+
+  <!-- ============================================================ -->
+  <section class="hero" id="top">
+    <div class="section-kicker">Hackathon submission</div>
+    <h1>Genz &mdash; traffic-camera event detection &amp; accident anticipation</h1>
+    <p class="lede">
+      A two-part solution for the fixed-road-camera challenge: <strong>Part A</strong>
+      detects and timestamps traffic events (accidents, near-misses, congestion,
+      jaywalking, and more) in a finished video, and <strong>Part B</strong> watches a
+      video frame-by-frame and outputs a causal, real-time accident-risk score that
+      never looks at the future. Everything ships as a zero-training,
+      zero-GPU, rule-based pipeline that runs on CPU out of the box, with an
+      optional learned-detector upgrade path already wired in.
+    </p>
+    <span class="pill">Rule-based baseline, no training data</span>
+    <span class="pill">Runs on CPU</span>
+    <span class="pill">Optional YOLO upgrade path</span>
+    <span class="pill">14 challenge classes, 8 implemented automatically</span>
+  </section>
+
+  <!-- ============================================================ -->
+  <section id="team">
+    <div class="section-kicker">Who built this</div>
+    <h2>Team</h2>
+    <p>
+      Team member details below are placeholders &mdash; real names, roles, and
+      profile links go here before submission.
+    </p>
+
+    <!-- TODO: fill in real team member info (name, role, contribution, links) -->
+    <div class="card-grid">
+      <div class="card">
+        <div class="avatar">M1</div>
+        <span class="todo-badge">TODO</span>
+        <h3>[Member 1 Name]</h3>
+        <div class="role">[Role, e.g. Detection &amp; tracking]</div>
+        <div class="did">[What they built: e.g. src/detector.py, src/tracker.py]</div>
+        <div class="linkrow">
+          <span class="placeholder">[GitHub link]</span>
+          <span class="placeholder">[LinkedIn link]</span>
+          <span class="placeholder">[Portfolio link]</span>
+        </div>
+      </div>
+
+      <!-- TODO: fill in real team member info (name, role, contribution, links) -->
+      <div class="card">
+        <div class="avatar">M2</div>
+        <span class="todo-badge">TODO</span>
+        <h3>[Member 2 Name]</h3>
+        <div class="role">[Role, e.g. Rules engine &amp; road model]</div>
+        <div class="did">[What they built: e.g. src/rules.py, src/road_model.py]</div>
+        <div class="linkrow">
+          <span class="placeholder">[GitHub link]</span>
+          <span class="placeholder">[LinkedIn link]</span>
+          <span class="placeholder">[Portfolio link]</span>
+        </div>
+      </div>
+
+      <!-- TODO: fill in real team member info (name, role, contribution, links) -->
+      <div class="card">
+        <div class="avatar">M3</div>
+        <span class="todo-badge">TODO</span>
+        <h3>[Member 3 Name]</h3>
+        <div class="role">[Role, e.g. Risk engine &amp; website/demo]</div>
+        <div class="did">[What they built: e.g. src/risk.py, website/]</div>
+        <div class="linkrow">
+          <span class="placeholder">[GitHub link]</span>
+          <span class="placeholder">[LinkedIn link]</span>
+          <span class="placeholder">[Portfolio link]</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================ -->
+  <section id="approach">
+    <div class="section-kicker">What we're solving</div>
+    <h2>Problem &amp; approach</h2>
+    <p>
+      The challenge has two parts, both over the same fixed, non-moving road-camera
+      footage:
+    </p>
+    <p>
+      <strong>Part A -- event detection.</strong> Given a finished video, return every
+      interesting event as <code>[start_sec, end_sec, label]</code>, where the label
+      is one of 14 fixed classes (accidents, near-misses, wrong-way driving,
+      jaywalking, congestion, and so on). This is scored after the fact, so the
+      whole video is available at once.
+    </p>
+    <p>
+      <strong>Part B -- accident anticipation.</strong> Given the same video played
+      frame by frame, output a risk score from 0 to 1 at every frame, <em>before</em>
+      anything bad has necessarily happened -- and it must be causal: at frame
+      <em>t</em> the model may only use frames up to and including <em>t</em>, never
+      later ones. The scoring rewards catching danger a few seconds early.
+    </p>
+
+    <div class="diagram-label">Part A pipeline (offline, sees the whole video)</div>
+    <div class="pipeline parta">
+      <div class="node">Video<small>.mp4 file</small></div>
+      <span class="arrow">&rarr;</span>
+      <div class="node">MotionDetector<small>MOG2 background subtraction (default)<br/>or optional YOLO</small></div>
+      <span class="arrow">&rarr;</span>
+      <div class="node">IoU Tracker<small>greedy per-frame box matching</small></div>
+      <span class="arrow">&rarr;</span>
+      <div class="node">Road Model<small>convex-hull road mask +<br/>dominant flow direction</small></div>
+      <span class="arrow">&rarr;</span>
+      <div class="node">Rules Engine<small>per-track &amp; pairwise heuristics</small></div>
+      <span class="arrow">&rarr;</span>
+      <div class="node">Events list<small>[start, end, label]</small></div>
+    </div>
+
+    <div class="diagram-label">Part B pipeline (causal, one frame at a time)</div>
+    <div class="pipeline partb">
+      <div class="node">Video frames<small>delivered one at a time,<br/>in order</small></div>
+      <span class="arrow">&rarr;</span>
+      <div class="node">CausalRiskEngine<small>its own detector + tracker,<br/>rebuilt frame by frame</small></div>
+      <span class="arrow">&rarr;</span>
+      <div class="node">TTC / braking /<br/>pedestrian signals<small>combined with max(), then<br/>smoothed with EMA</small></div>
+      <span class="arrow">&rarr;</span>
+      <div class="node">Risk score<small>0.0&ndash;1.0 per frame</small></div>
+    </div>
+    <span class="causal-note">causal &mdash; never sees future frames</span>
+
+    <div class="note-box">
+      <strong>What's learned vs. what's rules:</strong> by default, 100% of this
+      pipeline is hand-written rules on top of classical computer vision
+      (OpenCV MOG2 background subtraction + contour geometry + an IoU
+      tracker). There is no trained model and no learned weights anywhere in
+      the default path. <code>src/detector.py</code> also defines an optional
+      <code>YoloDetector</code> that swaps in automatically if the
+      <code>ultralytics</code> package and a <code>weights/yolov8n.pt</code>
+      file are both present -- a learned-detector upgrade path that's wired
+      but not required to run.
+    </div>
+
+    <div class="class-cols">
+      <div>
+        <h3>8 classes detected automatically</h3>
+        <p style="font-size:0.88rem">Each has a concrete, per-camera-agnostic signal derived from track geometry.</p>
+        <ul class="class-list">
+          <li><span class="swatch" style="background:var(--ev-stopped_vehicle)"></span> stopped_vehicle &mdash; stationary &ge;10s</li>
+          <li><span class="swatch" style="background:var(--ev-congestion)"></span> congestion &mdash; &ge;3 vehicle tracks mostly stationary across the road for &ge;8s</li>
+          <li><span class="swatch" style="background:var(--ev-wrong_way)"></span> wrong_way &mdash; heading &ge;135&deg; opposed to dominant flow</li>
+          <li><span class="swatch" style="background:var(--ev-near_miss)"></span> near_miss &mdash; close approach + high closing speed, then divergence, no overlap</li>
+          <li><span class="swatch" style="background:var(--ev-accident)"></span> accident &mdash; bounding-box overlap between two tracks</li>
+          <li><span class="swatch" style="background:var(--ev-road_obstacle)"></span> road_obstacle &mdash; static "unknown"-class blob on the road for &ge;10s</li>
+          <li><span class="swatch" style="background:var(--ev-jaywalking)"></span> jaywalking &mdash; person-classified blob inside the road-mask polygon</li>
+          <li><span class="swatch" style="background:var(--ev-failure_to_yield)"></span> failure_to_yield &mdash; vehicle&ndash;person bounding-box overlap</li>
+        </ul>
+      </div>
+      <div>
+        <h3>6 classes not yet implemented</h3>
+        <p style="font-size:0.88rem">Documented extension points &mdash; each needs per-camera calibration data (a <code>calibration.json</code>) we don't have without real sample footage. They never appear in <code>detect_events</code> output today.</p>
+        <ul class="class-list pending">
+          <li><span class="swatch"></span> red_light &mdash; needs a calibrated signal-state ROI</li>
+          <li><span class="swatch"></span> stop_line &mdash; needs a calibrated stop-line geometry</li>
+          <li><span class="swatch"></span> illegal_u_turn &mdash; needs no-U-turn zone geometry</li>
+          <li><span class="swatch"></span> illegal_turn &mdash; needs lane/turn geometry</li>
+          <li><span class="swatch"></span> solid_line_crossing &mdash; needs lane-marking geometry</li>
+          <li><span class="swatch"></span> fire_smoke &mdash; a MOG2 motion blob carries no reliable color/texture cue for smoke</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================ -->
+  <section id="eda">
+    <div class="section-kicker">Exploratory data analysis</div>
+    <h2>EDA of sample videos</h2>
+    <div class="notice">
+      <strong>No camera sample footage has been provided to this team yet.</strong>
+      This dashboard will populate automatically once videos are placed in
+      <code>samples/</code> and an EDA script (<code>src/eda.py</code>, to be added)
+      is run over them. Everything below is a structural placeholder, not
+      real data.
+    </div>
+
+    <div class="chart-grid">
+      <div class="chart-box">
+        <h4>Resolution / FPS / duration per sample</h4>
+        <table style="width:100%; font-size:0.8rem; border-collapse:collapse; opacity:.55">
+          <thead>
+            <tr><th style="text-align:left">Video</th><th style="text-align:left">Resolution</th><th style="text-align:left">FPS</th><th style="text-align:left">Duration</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>&mdash;</td><td>&mdash;</td><td>&mdash;</td><td>&mdash;</td></tr>
+            <tr><td>&mdash;</td><td>&mdash;</td><td>&mdash;</td><td>&mdash;</td></tr>
+            <tr><td>&mdash;</td><td>&mdash;</td><td>&mdash;</td><td>&mdash;</td></tr>
+          </tbody>
+        </table>
+        <div class="watermark-label">No data yet</div>
+      </div>
+
+      <div class="chart-box">
+        <h4>Object count over time</h4>
+        <svg viewBox="0 0 240 100" style="opacity:.5">
+          <line x1="20" y1="10" x2="20" y2="85" stroke="var(--gridline)" stroke-width="1"/>
+          <line x1="20" y1="85" x2="230" y2="85" stroke="var(--gridline)" stroke-width="1"/>
+          <polyline points="20,85 60,85 100,85 140,85 180,85 220,85" fill="none" stroke="var(--ink-muted)" stroke-width="2" stroke-dasharray="4 4"/>
+        </svg>
+        <div class="watermark-label">No data yet</div>
+      </div>
+
+      <div class="chart-box">
+        <h4>Motion heatmap</h4>
+        <svg viewBox="0 0 240 100" style="opacity:.5">
+          <rect x="10" y="10" width="220" height="80" rx="4" fill="none" stroke="var(--ink-muted)" stroke-dasharray="4 4"/>
+          <g fill="var(--surface-2)" stroke="var(--gridline)">
+            <rect x="10" y="10" width="27.5" height="26.7"/><rect x="37.5" y="10" width="27.5" height="26.7"/><rect x="65" y="10" width="27.5" height="26.7"/><rect x="92.5" y="10" width="27.5" height="26.7"/><rect x="120" y="10" width="27.5" height="26.7"/><rect x="147.5" y="10" width="27.5" height="26.7"/><rect x="175" y="10" width="27.5" height="26.7"/><rect x="202.5" y="10" width="27.5" height="26.7"/>
+            <rect x="10" y="36.7" width="27.5" height="26.7"/><rect x="37.5" y="36.7" width="27.5" height="26.7"/><rect x="65" y="36.7" width="27.5" height="26.7"/><rect x="92.5" y="36.7" width="27.5" height="26.7"/><rect x="120" y="36.7" width="27.5" height="26.7"/><rect x="147.5" y="36.7" width="27.5" height="26.7"/><rect x="175" y="36.7" width="27.5" height="26.7"/><rect x="202.5" y="36.7" width="27.5" height="26.7"/>
+            <rect x="10" y="63.3" width="27.5" height="26.7"/><rect x="37.5" y="63.3" width="27.5" height="26.7"/><rect x="65" y="63.3" width="27.5" height="26.7"/><rect x="92.5" y="63.3" width="27.5" height="26.7"/><rect x="120" y="63.3" width="27.5" height="26.7"/><rect x="147.5" y="63.3" width="27.5" height="26.7"/><rect x="175" y="63.3" width="27.5" height="26.7"/><rect x="202.5" y="63.3" width="27.5" height="26.7"/>
+          </g>
+        </svg>
+        <div class="watermark-label">No data yet</div>
+      </div>
+
+      <div class="chart-box">
+        <h4>Traffic density (vehicles / lane)</h4>
+        <svg viewBox="0 0 240 100" style="opacity:.5">
+          <line x1="20" y1="10" x2="20" y2="85" stroke="var(--gridline)" stroke-width="1"/>
+          <line x1="20" y1="85" x2="230" y2="85" stroke="var(--gridline)" stroke-width="1"/>
+          <g fill="none" stroke="var(--ink-muted)" stroke-dasharray="3 3">
+            <rect x="35" y="65" width="20" height="20"/>
+            <rect x="70" y="65" width="20" height="20"/>
+            <rect x="105" y="65" width="20" height="20"/>
+            <rect x="140" y="65" width="20" height="20"/>
+            <rect x="175" y="65" width="20" height="20"/>
+          </g>
+        </svg>
+        <div class="watermark-label">No data yet</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================ -->
+  <section id="results">
+    <div class="section-kicker">Model output</div>
+    <h2>Results on sample videos</h2>
+    <div class="notice">
+      <strong>No sample results yet either.</strong> This section will show
+      annotated playback, a per-video event timeline, and a per-video risk
+      curve once real files exist under <code>samples/*.mp4</code> and have
+      been run through <code>run_submission.py</code>. The block below is a
+      synthetic mockup of the intended layout only.
+    </div>
+
+    <div class="chart-box" style="border-style:solid">
+      <span class="mockup-label">Illustrative mockup &mdash; not real output</span>
+      <h4 style="margin-bottom:14px">sample_01.mp4 &mdash; event timeline + risk curve (synthetic example)</h4>
+
+      <svg viewBox="0 0 600 60" role="img" aria-label="Illustrative synthetic event timeline">
+        <rect x="0" y="0" width="600" height="60" fill="var(--surface-2)" rx="4"/>
+        <rect x="30" y="15" width="60" height="30" rx="3" fill="var(--ev-stopped_vehicle)"/>
+        <rect x="150" y="15" width="90" height="30" rx="3" fill="var(--ev-congestion)"/>
+        <rect x="330" y="15" width="24" height="30" rx="3" fill="var(--ev-accident)"/>
+        <rect x="420" y="15" width="40" height="30" rx="3" fill="var(--ev-near_miss)"/>
+      </svg>
+
+      <svg viewBox="0 0 600 90" role="img" aria-label="Illustrative synthetic risk curve" style="margin-top:6px">
+        <line x1="0" y1="80" x2="600" y2="80" stroke="var(--gridline)" stroke-width="1"/>
+        <line x1="0" y1="10" x2="0" y2="80" stroke="var(--gridline)" stroke-width="1"/>
+        <polyline
+          points="0,75 60,73 120,70 180,68 240,40 300,20 330,12 360,30 420,55 480,70 540,74 600,75"
+          fill="none" stroke="var(--ev-stopped_vehicle)" stroke-width="2.5" />
+        <text x="4" y="16" font-size="9" fill="var(--ink-muted)">risk 1.0</text>
+        <text x="4" y="78" font-size="9" fill="var(--ink-muted)">risk 0.0</text>
+      </svg>
+
+      <div class="legend">
+        <span class="item"><span class="swatch" style="background:var(--ev-stopped_vehicle)"></span>stopped_vehicle</span>
+        <span class="item"><span class="swatch" style="background:var(--ev-congestion)"></span>congestion</span>
+        <span class="item"><span class="swatch" style="background:var(--ev-accident)"></span>accident</span>
+        <span class="item"><span class="swatch" style="background:var(--ev-near_miss)"></span>near_miss</span>
+        <span class="item">&mdash; risk score (Part B), synthetic</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================ -->
+  <section id="demo">
+    <div class="section-kicker">Try it yourself</div>
+    <h2>Live demo</h2>
+    <p>
+      Runs the real <code>solution.detect_events()</code> from this repo's
+      <code>solution.py</code> against a video you upload, locally, on your own
+      machine. This is a genuine model run, not a canned animation.
+    </p>
+    <p class="limits-text">
+      Limits: <strong>.mp4 only</strong>, up to <strong>2 minutes</strong>
+      (<span id="demo-max-seconds">120</span>s) and <strong>200MB</strong>. Longer or
+      larger files are rejected with an error rather than silently truncated.
+      This demo currently shows <strong>Part A events only</strong> &mdash; risk-curve
+      visualization: coming soon.
+    </p>
+
+    <div class="demo-panel">
+      <form class="demo-controls" onsubmit="return false;">
+        <input type="file" id="demo-file" accept=".mp4,video/mp4" />
+        <button type="submit" id="demo-run" class="run-btn">Run detect_events()</button>
+      </form>
+
+      <div class="status-line" id="demo-status">
+        <span class="spinner" id="demo-spinner"></span>
+        <span id="demo-status-text">Pick an .mp4 file and click run.</span>
+      </div>
+
+      <div class="timeline-wrap" id="demo-timeline-wrap">
+        <div class="timeline-axis" id="demo-timeline-axis"></div>
+        <div class="timeline-ticks" id="demo-timeline-ticks"></div>
+        <div class="legend" id="demo-legend"></div>
+
+        <table class="events-table">
+          <thead>
+            <tr><th></th><th>Class</th><th>Start</th><th>End</th><th>Duration</th></tr>
+          </thead>
+          <tbody id="demo-table-body"></tbody>
+        </table>
+      </div>
+      <div class="empty-state" id="demo-empty-state" style="display:none"></div>
+    </div>
+
+    <div class="note-box">
+      This page needs to be served by <code>website/demo_server.py</code>
+      (a small Flask app) &mdash; see <code>website/README.md</code> for the two
+      commands to run it. Opening this file directly from disk will render the
+      page fine, but the "Run" button will fail to reach a server, since
+      there isn't one. This demo runs on <strong>your own machine</strong>; it is
+      not hosted anywhere publicly (see Links below).
+    </div>
+  </section>
+
+  <!-- ============================================================ -->
+  <section id="report">
+    <div class="section-kicker">Honest self-assessment</div>
+    <h2>Report</h2>
+
+    <div class="report-grid">
+      <div class="report-block">
+        <h3>What we built</h3>
+        <ul>
+          <li>A zero-dependency motion detector (OpenCV MOG2 + contour classification) with an optional YOLOv8 swap-in when weights are present.</li>
+          <li>A minimal greedy IoU multi-object tracker with full per-track position history.</li>
+          <li>A self-calibrating road model (convex hull of observed vehicle positions + circular-mean dominant flow direction), usable both offline and causally.</li>
+          <li>A rules engine that turns finished tracks into 8 of the 14 required event classes.</li>
+          <li>A causal risk engine (Part B) combining time-to-collision, hard-braking, and pedestrian-proximity signals with max() + EMA smoothing, calibrated so a 5s time-to-collision maps to a 0.5 score.</li>
+          <li>This website, including a working local live-demo server.</li>
+        </ul>
+      </div>
+      <div class="report-block">
+        <h3>What worked</h3>
+        <ul>
+          <li>The zero-dependency motion detector runs entirely on CPU with no training data and no GPU.</li>
+          <li>The causal risk engine genuinely respects the no-future-frames rule: <code>RiskEstimator.step()</code> only ever sees the current frame and its own running state.</li>
+          <li><code>run_submission.py</code> / <code>evaluate.py</code> match the challenge's own harness and metric spec (macro F1 across IoU 0.3/0.5/0.7 for Part A; AP + alarm-F1 + mean-time-to-accident for Part B; <code>M = 0.7*ScoreA + 0.3*ScoreB</code>) exactly, so scoring behaves as the organizers intend.</li>
+        </ul>
+      </div>
+      <div class="report-block">
+        <h3>What didn't / limitations</h3>
+        <ul>
+          <li>No labeled data exists yet, so every threshold (stationary speed, wrong-way angle, near-miss closing speed, etc.) is hand-picked from first principles, not tuned against real ground truth.</li>
+          <li>6 of 14 classes (red_light, stop_line, illegal_u_turn, illegal_turn, solid_line_crossing, fire_smoke) need per-camera calibration data we don't have and are left as documented extension points rather than guessed.</li>
+          <li>Classifying "vehicle" vs. "person" from blob size/aspect ratio alone is weak and will misclassify unusual shapes; a real detector would help a lot &mdash; the YOLO hook is already wired for exactly this upgrade.</li>
+          <li>accident / near_miss detection relies on 2D bounding-box overlap with no depth cue, so a vehicle that merely passes close to the camera's line of sight can look like an overlap and false-positive.</li>
+        </ul>
+      </div>
+      <div class="report-block">
+        <h3>Next steps</h3>
+        <ul>
+          <li>Get real sample videos into <code>samples/</code> and generate real EDA and results.</li>
+          <li>Hand-annotate a small dev set and tune thresholds against <code>evaluate.py</code> instead of by hand.</li>
+          <li>Drop in real YOLO weights (<code>weights/yolov8n.pt</code>, see <code>weights/download.sh</code>) for cleaner class labels.</li>
+          <li>Calibrate stop-line / signal-state ROIs / lane geometry per camera to unlock the remaining 6 classes.</li>
+          <li>Publicly host this demo (see Links) once the team has an account ready.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================ -->
+  <section id="links">
+    <div class="section-kicker">Where things live</div>
+    <h2>Links</h2>
+    <ul class="links-list">
+      <li>
+        <span class="label">Repository</span>
+        <!-- TODO: add this repo's URL -->
+        <span class="pill">TODO</span>
+        <span>Team knows the URL; paste it here before submitting.</span>
+      </li>
+      <li>
+        <span class="label">Model weights</span>
+        <span>The baseline ships with <strong>zero external weights</strong> (pure OpenCV + hand-written rules). An optional YOLOv8 weights file can be fetched with <code>weights/download.sh</code>, but nothing in the default path requires it.</span>
+      </li>
+      <li>
+        <span class="label">predictions_samples.json</span>
+        <!-- TODO: link to a real predictions_samples.json once sample videos exist and run_submission.py has been run -->
+        <span class="pill">TODO</span>
+        <span>Not generated yet &mdash; requires real sample videos (see EDA / Results above).</span>
+      </li>
+    </ul>
+  </section>
+
+</main>
+
+<footer>
+  Team Genz &middot; traffic-camera event detection &amp; accident anticipation &middot;
+  built with OpenCV, plain Python, and no training data.
+</footer>
+
+<script src="assets/demo.js"></script>
+</body>
+</html>

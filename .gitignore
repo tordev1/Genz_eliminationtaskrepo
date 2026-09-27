@@ -1,0 +1,18 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.egg-info/
+
+# Weights are optional and can be large; download.sh fetches them, don't commit binaries.
+weights/*.pt
+weights/*.onnx
+weights/*.engine
+
+# Local scratch / generated outputs, not part of the submission itself.
+docs/eda_output/
+*.mp4
+!samples/.gitkeep
+
+.DS_Store
+Thumbs.db

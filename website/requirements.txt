@@ -1,0 +1,4 @@
+# Website's own light dependency (in addition to the repo root's
+# requirements.txt, which the demo server also needs since it imports
+# solution.py -- opencv-python and numpy).
+flask==3.0.3

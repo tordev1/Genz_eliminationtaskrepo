@@ -1,0 +1,7 @@
+opencv-python==4.10.0.84
+numpy==1.26.4
+
+# Optional upgrade path (see src/detector.py / README "Extension points").
+# Uncomment and run weights/download.sh if you want real YOLO detections
+# instead of the zero-dependency motion-detector baseline.
+# ultralytics==8.3.0
