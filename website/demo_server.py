@@ -71,6 +71,15 @@ JOB_TIMEOUT_SEC = 300.0
 JOBS_DIR = os.path.join(tempfile.gettempdir(), "genz_demo_jobs")
 JOB_RETENTION_SEC = 3600.0  # best-effort cleanup of old job directories
 
+# This shared host enforces a low RLIMIT_NPROC (max processes+threads for the
+# whole account) -- observed via passenger.log to fail outright (fork()/
+# pthread_create errors, corrupting numpy's own import in the losing worker)
+# when two detect-worker subprocesses were alive at the same time. Only one
+# job actually runs at once; a second submission's background thread just
+# waits its turn on this lock before spawning its subprocess. Jobs still
+# queue and eventually complete rather than crashing.
+_JOB_SLOT = threading.Lock()
+
 app = Flask(__name__, static_folder=None)
 app.config["MAX_CONTENT_LENGTH"] = MAX_CONTENT_BYTES
 
@@ -140,6 +149,11 @@ def _cleanup_old_jobs():
 
 
 def _run_job(job_id: str, video_path: str, status_path: str):
+    with _JOB_SLOT:
+        _run_job_locked(video_path, status_path)
+
+
+def _run_job_locked(video_path: str, status_path: str):
     try:
         result = subprocess.run(
             [sys.executable, WORKER_SCRIPT, video_path],
