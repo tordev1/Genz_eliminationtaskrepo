@@ -17,10 +17,15 @@ illegal_turn, solid_line_crossing, fire_smoke) need information this
 camera-agnostic pipeline does not have out of the box -- a calibrated stop
 line, signal-state ROI, or lane-marking geometry, or reliable color/texture
 cues for smoke that a MOG2 blob does not carry. Rather than emit
-low-precision guesses that would hurt Score_A, they are left as documented
-extension points (see README "Known limitations & extension points") wired
-through `CalibrationConfig` below -- drop in a `calibration.json` for a
-given camera and `red_light`/`stop_line`/etc. switch on automatically.
+low-precision guesses that would hurt Score_A, they are left undetected.
+
+`CalibrationConfig` below is a documented schema for what that calibration
+data would look like -- it is currently an **unwired, unused extension
+point**: nothing in this file constructs one or reads its fields. Wiring it
+in (load it in solution.py, pass it through to build_events, add the six
+rule functions that would consume it) is real, un-started work, listed in
+docs/REPORT.md's next steps -- not something that "switches on" by dropping
+a JSON file next to a video today.
 """
 from __future__ import annotations
 
@@ -33,6 +38,7 @@ from typing import Dict, List, Optional, Tuple
 from .geometry import distance, iou, merge_close_intervals
 from .road_model import RoadModel
 from .tracker import Track
+from .tunable import apply_overrides
 
 MIN_STOPPED_SEC = 10.0
 STATIONARY_SPEED_PX_S = 6.0
@@ -41,17 +47,22 @@ WRONG_WAY_ANGLE_DEG = 135.0
 WRONG_WAY_MIN_SEC = 1.5
 NEAR_MISS_CLOSE_FACTOR = 1.4  # multiple of combined box size counted as "close"
 NEAR_MISS_MIN_CLOSING_SPEED = 40.0  # px/s
+MIN_ACCIDENT_OVERLAP_SEC = 0.15  # drops single-frame blob-merge noise from MOG2
 CONGESTION_MIN_TRACKS = 3
 CONGESTION_STATIONARY_FRACTION = 0.7
 CONGESTION_MIN_SEC = 8.0
 MERGE_GAP_SEC = 0.75
 
+# Retunes any of the constants above from tuned_params.json, if one exists
+# (see src/tunable.py and tools/tune_thresholds.py). No-op until a real dev
+# set has been annotated and the tuner has actually been run.
+apply_overrides(globals(), "rules")
+
 
 @dataclass
 class CalibrationConfig:
-    """Optional per-camera calibration; loaded from calibration.json next to
-    the video if present. Absence disables the classes that need it -- see
-    module docstring.
+    """Schema for optional per-camera calibration (see module docstring for
+    current status: defined here, not yet consumed anywhere).
     """
     stop_line: Optional[List[Tuple[float, float]]] = None
     signal_roi: Optional[Tuple[int, int, int, int]] = None
@@ -64,7 +75,9 @@ class CalibrationConfig:
         if not path or not os.path.isfile(path):
             return CalibrationConfig()
         with open(path, "r", encoding="utf-8") as f:
-            data = json.load(f)
+            raw = json.load(f)
+        known_fields = {"stop_line", "signal_roi", "no_u_turn_zones", "solid_lines", "crosswalks"}
+        data = {k: v for k, v in raw.items() if k in known_fields}
         return CalibrationConfig(**data)
 
 
@@ -180,17 +193,22 @@ def _pairwise_events(tracks: Dict[int, Track]) -> Tuple[
     proximity between every pair of tracks, scanned along shared timestamps.
     """
     accident, near_miss, failure_to_yield = [], [], []
-    ids = list(tracks.keys())
+    # Only consider tracks with enough history and a real classification --
+    # "unknown"-labelled blobs are MOG2's least reliable output (merged
+    # shadows, noise, partial occlusions), and an unknown/unknown box overlap
+    # is the single biggest source of false `accident` events, not a real
+    # contact between road users.
+    ids = [
+        tid for tid, t in tracks.items()
+        if len(t.history) >= 2 and t.label != "unknown"
+    ]
+    idx_by_id = {tid: {round(p.t, 3): p for p in tracks[tid].history} for tid in ids}
     for i in range(len(ids)):
         ta = tracks[ids[i]]
-        if len(ta.history) < 2:
-            continue
-        idx_a = {round(p.t, 3): p for p in ta.history}
+        idx_a = idx_by_id[ids[i]]
         for j in range(i + 1, len(ids)):
             tb = tracks[ids[j]]
-            if len(tb.history) < 2:
-                continue
-            idx_b = {round(p.t, 3): p for p in tb.history}
+            idx_b = idx_by_id[ids[j]]
             shared = sorted(set(idx_a) & set(idx_b))
             if len(shared) < 2:
                 continue
@@ -223,7 +241,8 @@ def _pairwise_events(tracks: Dict[int, Track]) -> Tuple[
                         failure_to_yield.append((overlap_run_start, t))
                 else:
                     if overlap_run_start is not None:
-                        accident.append((overlap_run_start, t))
+                        if t - overlap_run_start >= MIN_ACCIDENT_OVERLAP_SEC:
+                            accident.append((overlap_run_start, t))
                         overlap_run_start = None
 
                 is_close = d <= close_thresh(pa, pb)
@@ -241,7 +260,7 @@ def _pairwise_events(tracks: Dict[int, Track]) -> Tuple[
 
                 prev_t, prev_dist = t, d
 
-            if overlap_run_start is not None:
+            if overlap_run_start is not None and shared[-1] - overlap_run_start >= MIN_ACCIDENT_OVERLAP_SEC:
                 accident.append((overlap_run_start, shared[-1]))
             if close_run_start is not None and had_contact_in_close_run:
                 near_miss.append((close_run_start, shared[-1]))

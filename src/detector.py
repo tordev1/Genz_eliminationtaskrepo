@@ -16,6 +16,7 @@ which one produced a box.
 """
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from typing import List, Optional
 
@@ -137,8 +138,6 @@ class YoloDetector:
 
     @staticmethod
     def try_create(weights_path: str) -> Optional["YoloDetector"]:
-        import os
-
         if not os.path.isfile(weights_path):
             return None
         try:
@@ -152,9 +151,22 @@ class YoloDetector:
             return None
 
 
-def build_default_detector(weights_path: str = "weights/yolov8n.pt"):
+_REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+
+
+def build_default_detector(weights_path: str = None):
     """Use YOLO if it's actually available and loadable, else fall back to
     the zero-dependency motion detector. Called once per video in solution.py.
+
+    `weights_path` defaults to weights/yolov8n.pt resolved relative to the
+    repo root (this file's parent directory), not the process's current
+    working directory -- the harness may be invoked from anywhere.
     """
+    if weights_path is None:
+        weights_path = os.path.join(_REPO_ROOT, "weights", "yolov8n.pt")
     yolo = YoloDetector.try_create(weights_path)
-    return yolo if yolo is not None else MotionDetector()
+    if yolo is not None:
+        print(f"[detector] using YoloDetector ({weights_path})")
+        return yolo
+    print(f"[detector] using MotionDetector (no weights at {weights_path})")
+    return MotionDetector()

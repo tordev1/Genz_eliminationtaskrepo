@@ -29,12 +29,18 @@ from .detector import build_default_detector
 from .geometry import distance
 from .road_model import RoadModel
 from .tracker import IouTracker
+from .tunable import apply_overrides
 
-H_SEC = 5.0  # challenge-fixed anticipation horizon
+H_SEC = 5.0  # challenge-fixed anticipation horizon -- not tunable, the spec sets it
 DETECT_EVERY_N_FRAMES = 2
 CLOSE_FACTOR = 3.0  # "nearby" = within this many combined-box-sizes
 BRAKE_DECEL_REF = 250.0  # px/s^2 treated as "hard braking" (empirical, resolution-dependent)
 EMA_ALPHA = 0.5
+
+# See src/tunable.py. H_SEC is denylisted, not just excluded from the
+# tuner's grid -- the 5s horizon is fixed by the challenge spec, not a free
+# parameter, and this makes that structural rather than a convention.
+apply_overrides(globals(), "risk", deny=frozenset({"H_SEC"}))
 
 
 class CausalRiskEngine:

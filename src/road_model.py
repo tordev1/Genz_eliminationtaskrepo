@@ -22,6 +22,9 @@ except ImportError:
     cv2 = None
 
 
+REBUILD_EVERY_N_SAMPLES = 8  # throttles the O(n) hull/angle rebuild -- see add_sample
+
+
 class RoadModel:
     def __init__(self, frame_shape: Tuple[int, int]):
         self.h, self.w = frame_shape[:2]
@@ -30,13 +33,22 @@ class RoadModel:
         self._hull_mask: Optional[np.ndarray] = None
         self._dominant_angle: Optional[float] = None
         self._dirty = True
+        self._samples_since_rebuild = 0
 
     def add_sample(self, cx: float, cy: float, vx: float = 0.0, vy: float = 0.0):
         self._points.append((cx, cy))
         speed = math.hypot(vx, vy)
         if speed > 2.0:  # ignore near-zero noise so idle vehicles don't wash out direction
             self._vectors.append((vx, vy))
-        self._dirty = True
+        # Rebuilding the hull is an O(n) hull recompute plus a full-frame mask
+        # allocation -- too expensive to do on every single sample when this
+        # is called every processed frame in the causal (Part B) path.
+        # Freshness at N=8 samples is more than enough for something as
+        # slow-changing as "where the road is."
+        self._samples_since_rebuild += 1
+        if self._hull_mask is None or self._samples_since_rebuild >= REBUILD_EVERY_N_SAMPLES:
+            self._dirty = True
+            self._samples_since_rebuild = 0
         # Keep this bounded for the causal, per-frame use case.
         if len(self._points) > 20000:
             self._points = self._points[-10000:]
