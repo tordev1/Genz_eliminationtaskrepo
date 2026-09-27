@@ -181,9 +181,9 @@ Team **Genz**. See the website's Team page for member roles and links.
 
 | Member | Role | What they did |
 |---|---|---|
-| [Member 1 name] | [role] | [contribution] |
-| [Member 2 name] | [role] | [contribution] |
-| [Member 3 name] | [role] | [contribution] |
+| Sanjar Abduvaitov | Detection & tracking, deployment | `src/detector.py`, `src/tracker.py`; live deployment (genzwiut.com) |
+| Kamola Esheva | Rules engine & road model | `src/rules.py`, `src/road_model.py` |
+| Sogdiana Erkabaeva | Risk engine & website/demo | `src/risk.py`, `website/` |
 
 ## Repository layout
 
