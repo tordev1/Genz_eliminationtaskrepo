@@ -8,7 +8,7 @@ unmodified files from the organizers' `wiut_cv_scripts` starter kit** --
 only `solution.py` and everything under `src/` is ours. See
 `docs/REPORT.md` for the full write-up (what worked, what didn't, next
 steps), `HANDOFF.md` for an independent-review brief, and `website/` for
-the team site + live local demo.
+the team site + live demo (publicly hosted at https://genzwiut.com).
 
 ## Install & run
 
@@ -210,7 +210,7 @@ tools/
 tests/                   # pytest: interface, causality, format, rule-engine, tunable-loader
 examples/                # organizers' ground_truth.json / predictions.json (unmodified)
 website/                 # team site + live demo (Dockerfile included, see website/README.md)
-render.yaml              # one-click Render Blueprint deploy for the public demo (not part of grading)
+render.yaml              # alternative Docker-based deploy path for the demo (not part of grading; genzwiut.com is the live one)
 docs/REPORT.md           # what worked, what didn't, next steps
 docs/explainer.html       # published interactive architecture writeup
 HANDOFF.md               # independent-review brief (for a second AI/human reviewer)

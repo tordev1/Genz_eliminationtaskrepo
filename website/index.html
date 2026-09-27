@@ -310,8 +310,8 @@
     <h2>Live demo</h2>
     <p>
       Runs the real <code>solution.detect_events()</code> from this repo's
-      <code>solution.py</code> against a video you upload, locally, on your own
-      machine. This is a genuine model run, not a canned animation.
+      <code>solution.py</code> against a video you upload, live on this
+      server. This is a genuine model run, not a canned animation.
     </p>
     <p class="limits-text">
       Limits: <strong>.mp4 only</strong>, up to <strong>2 minutes</strong>
@@ -348,12 +348,14 @@
     </div>
 
     <div class="note-box">
-      This page needs to be served by <code>website/demo_server.py</code>
-      (a small Flask app) &mdash; see <code>website/README.md</code> for the two
-      commands to run it. Opening this file directly from disk will render the
-      page fine, but the "Run" button will fail to reach a server, since
-      there isn't one. This demo runs on <strong>your own machine</strong>; it is
-      not hosted anywhere publicly (see Links below).
+      This page is served by <code>website/demo_server.py</code> (a small
+      Flask app), publicly hosted at <a href="https://genzwiut.com">genzwiut.com</a>
+      via cPanel's Python App (Passenger WSGI) on the team's own domain. You
+      can also run it yourself locally &mdash; see <code>website/README.md</code>
+      for the two commands. Opening this file directly from disk (rather
+      than via a server) will render the page fine, but the "Run" button
+      will fail to reach a backend, since there isn't one at a bare
+      <code>file://</code> URL.
     </div>
   </section>
 
@@ -371,7 +373,7 @@
           <li>A self-calibrating road model (convex hull of observed vehicle positions + circular-mean dominant flow direction), usable both offline and causally.</li>
           <li>A rules engine that turns finished tracks into 8 of the 14 required event classes.</li>
           <li>A causal risk engine (Part B) combining time-to-collision, hard-braking, and pedestrian-proximity signals with max() + EMA smoothing, calibrated so a 5s time-to-collision maps to a 0.5 score.</li>
-          <li>This website, including a working local live-demo server.</li>
+          <li>This website, including a working live-demo server, publicly hosted at genzwiut.com.</li>
         </ul>
       </div>
       <div class="report-block">
@@ -398,7 +400,6 @@
           <li>Hand-annotate a small dev set and tune thresholds against <code>evaluate.py</code> instead of by hand.</li>
           <li>Drop in real YOLO weights (<code>weights/yolov8n.pt</code>, see <code>weights/download.sh</code>) for cleaner class labels.</li>
           <li>Calibrate stop-line / signal-state ROIs / lane geometry per camera to unlock the remaining 6 classes.</li>
-          <li>Publicly host this demo (see Links) once the team has an account ready.</li>
         </ul>
       </div>
     </div>
@@ -411,9 +412,11 @@
     <ul class="links-list">
       <li>
         <span class="label">Repository</span>
-        <!-- TODO: add this repo's URL -->
-        <span class="pill">TODO</span>
-        <span>Team knows the URL; paste it here before submitting.</span>
+        <span><a href="https://github.com/tordev1/Genz_eliminationtaskrepo">github.com/tordev1/Genz_eliminationtaskrepo</a></span>
+      </li>
+      <li>
+        <span class="label">Live demo</span>
+        <span><a href="https://genzwiut.com">genzwiut.com</a> &mdash; this site, self-hosted on the team's own domain via cPanel's Python App (Passenger WSGI), running the repo's actual <code>solution.py</code> pipeline.</span>
       </li>
       <li>
         <span class="label">Model weights</span>

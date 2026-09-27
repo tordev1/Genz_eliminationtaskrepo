@@ -1,28 +1,25 @@
 # Genz -- team website
 
 A static, no-build-step site covering the team, problem/approach, EDA,
-results, a live local demo, an honest report, and links. Plain HTML/CSS/JS;
-no npm install required.
+results, a live demo, an honest report, and links. Plain HTML/CSS/JS; no
+npm install required.
+
+**Live**: https://genzwiut.com -- the real site and demo, publicly hosted.
 
 ## Viewing the static pages
 
-Every section except the live demo works by just opening the file:
+Every section except the live demo also works by just opening the file
+directly, no server needed:
 
 ```
 website/index.html
 ```
 
-double-click it, or open it in a browser directly. No server needed for
-Team / Problem & Approach / EDA / Results / Report / Links.
-
-## Running the live demo
-
-The live demo needs a tiny local server because it runs the repo's own
-`solution.detect_events()` on an uploaded video and returns real results.
+## Running the live demo yourself (locally)
 
 ```bash
 # 1. From the repository root:
-pip install -r requirements.txt          # opencv-python, numpy (needed by solution.py)
+pip install -r requirements.txt          # opencv-python-headless, numpy (needed by solution.py)
 pip install -r website/requirements.txt  # flask (only extra dependency this website adds)
 
 # 2. Start the demo server:
@@ -47,33 +44,41 @@ The demo currently visualizes **Part A (event detection) only**. A Part B
 risk-curve visualization in the demo is a nice-to-have, not yet built --
 the page says "risk curve visualization: coming soon."
 
-## Public hosting
+## Public hosting -- how genzwiut.com actually runs it
 
-**Deploy target: Render**, via `../render.yaml` (a "Blueprint" -- Render
-reads it and auto-configures the service, no manual settings needed):
+Deployed via cPanel's **Setup Python App** feature (Phusion Passenger WSGI),
+Python 3.9, on the team's own GoDaddy-hosted domain:
 
-1. Push this repo to GitHub (already done: `github.com/tordev1/Genz_eliminationtaskrepo`).
-2. On [render.com](https://render.com), sign up / log in (free, no card
-   needed for a free web service) and connect your GitHub account.
-3. Dashboard -> **New** -> **Blueprint** -> pick this repo. Render detects
-   `render.yaml` at the repo root and configures the Docker build
-   (`website/Dockerfile`, build context = repo root) automatically.
-4. Deploy. Render assigns a public URL like
-   `https://genz-traffic-demo.onrender.com`.
+- `passenger_wsgi.py` (repo root when deployed there) exposes
+  `website.demo_server.app` as `application`, the WSGI callable Passenger
+  looks for -- it never triggers `demo_server.py`'s own
+  `if __name__ == "__main__": app.run(...)` block, since Passenger imports
+  the module rather than executing it as a script.
+- Dependencies (`opencv-python-headless`, `numpy`, `flask`) install cleanly
+  into cPanel's managed virtualenv via its "Run Pip Install" button --
+  headless OpenCV needs no system-level libraries root access would be
+  required for, which is exactly why it was the right choice here over
+  plain `opencv-python`.
+- Verified end to end against the live URL: homepage and static assets
+  serve, and a real `.mp4` posted to `/api/detect_events` returns a valid
+  `{"events": [...]}` response computed by the actual pipeline.
 
-No token or credential ever needs to be shared with anyone else for this --
-it's Render's own GitHub OAuth, done entirely in your browser.
+**Deployment package**: the exact file set cPanel's app root needs
+(`passenger_wsgi.py`, `requirements.txt`, `solution.py`, `src/`, `website/`,
+`weights/`) is assembled ad hoc for upload via cPanel's File Manager -- it's
+not a tracked folder in this repo, since it's just a repackaging of files
+that already live here for a specific host's directory layout.
 
-**Free-tier note**: Render's free web services sleep after inactivity, so
-the first request after a quiet period takes 30-60s to wake up (the demo's
-"processing..." indicator covers this, but it's worth knowing about before
-a judge's first click looks slow).
+### Alternative: Docker (Render, Hugging Face Spaces, etc.)
 
-(`website/Dockerfile` also works as-is on Hugging Face Spaces' Docker SDK or
-any other platform that runs a Dockerfile and injects a `PORT` env var --
-Render was chosen because it doesn't require payment-method verification to
-unlock a Docker-backed free service, unlike HF Spaces' Docker/Gradio SDKs on
-newer accounts.)
+`Dockerfile` in this folder + `../render.yaml` at the repo root are a
+ready, tested alternative deploy path (build context = repo root,
+`CMD ["python", "website/demo_server.py"]`, reads `PORT` from the
+environment) -- useful as a backup or for a teammate who'd rather not touch
+cPanel. Render's free web services don't require payment-method
+verification, unlike Hugging Face Spaces' Docker/Gradio SDKs on newer
+accounts (Static-only Spaces are free but can't run a Python backend at
+all). Not currently deployed anywhere; genzwiut.com is the live instance.
 
 ## Files
 
@@ -84,14 +89,12 @@ newer accounts.)
   table). Talks to `/api/detect_events`.
 - `demo_server.py` -- the Flask app described above.
 - `requirements.txt` -- this folder's only extra dependency (`flask`).
-- `Dockerfile` -- builds the demo for Render (or any Docker host); see
-  "Public hosting" above and `../render.yaml`.
+- `Dockerfile` -- alternative Docker-based deploy path, see above.
 
 ## Known placeholders (see the page itself for the visible/marked TODOs)
 
 - Team member names, roles, contributions, and profile links (3 cards).
 - EDA charts and results (no sample videos exist yet; the page says so
   honestly and shows placeholder skeleton charts rather than invented numbers).
-- Repository URL and `predictions_samples.json` link (both `<!-- TODO -->`
-  in `index.html`'s Links section).
-- Public hosting URL (none exists yet -- see above).
+- `predictions_samples.json` link (`<!-- TODO -->` in `index.html`'s Links
+  section) -- not generated yet, needs real sample videos first.
