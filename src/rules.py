@@ -47,7 +47,14 @@ WRONG_WAY_ANGLE_DEG = 135.0
 WRONG_WAY_MIN_SEC = 1.5
 NEAR_MISS_CLOSE_FACTOR = 1.4  # multiple of combined box size counted as "close"
 NEAR_MISS_MIN_CLOSING_SPEED = 40.0  # px/s
+NEAR_MISS_END_GRACE_SEC = 1.5  # bounds a near_miss to the evasive episode, not subsequent calm proximity
 MIN_ACCIDENT_OVERLAP_SEC = 0.15  # drops single-frame blob-merge noise from MOG2
+# IoU>ACCIDENT_IOU_THRESHOLD counts as "contact" for accident/failure_to_yield.
+# Real elevated-camera footage shows adjacent-lane vehicles overlapping in
+# the 2D image plane from foreshortening alone, with no actual contact --
+# this threshold is what separates that from a genuine collision's much
+# larger box overlap; tools/tune_thresholds.py searches it against real data.
+ACCIDENT_IOU_THRESHOLD = 0.1
 CONGESTION_MIN_TRACKS = 3
 CONGESTION_STATIONARY_FRACTION = 0.7
 CONGESTION_MIN_SEC = 8.0
@@ -130,7 +137,7 @@ def _wrong_way_events(track: Track, road: RoadModel) -> List[Tuple[float, float]
         vx = (p.cx - prev.cx) / dt if dt > 1e-6 else 0.0
         vy = (p.cy - prev.cy) / dt if dt > 1e-6 else 0.0
         speed = math.hypot(vx, vy)
-        deviation = road.heading_deviation_deg(vx, vy)
+        deviation = road.heading_deviation_deg(p.cx, p.cy, vx, vy)
         is_wrong = (
             speed >= WRONG_WAY_MIN_SPEED_PX_S
             and deviation is not None
@@ -165,24 +172,51 @@ def _road_obstacle_events(track: Track, road: RoadModel) -> List[Tuple[float, fl
     return [(p_first.t, p_last.t)]
 
 
+MAX_JAYWALKING_SEC = 20.0  # a real crossing/dwell shouldn't run longer than this;
+# caps a known false-positive mode where RoadModel's on_road hull (built from
+# vehicle positions, not lane markings) includes curb/sidewalk area near the
+# road, so a pedestrian who lingers there gets treated as continuously
+# on-road for as long as they stand there.
+
+
 def _jaywalking_events(track: Track, road: RoadModel) -> List[Tuple[float, float]]:
     if track.label != "person" or len(track.history) < 2:
         return []
     events = []
     run_start = None
+    run_points: List = []
     prev = None
+
+    def flush(end_t):
+        if run_start is None or not run_points:
+            return
+        # A real pedestrian walks; a static misclassified blob (a pole, a
+        # sign, a persistent shadow/lighting artifact MOG2 occasionally
+        # flags as "person" by aspect ratio) sits in place. Require actual
+        # displacement across the run -- at least a couple of the track's
+        # own box-widths -- before calling it jaywalking, so a static
+        # false positive doesn't get reported as one long crossing.
+        xs = [pt.cx for pt in run_points]
+        ys = [pt.cy for pt in run_points]
+        spread = max(max(xs) - min(xs), max(ys) - min(ys))
+        avg_w = sum(pt.w for pt in run_points) / len(run_points)
+        if spread >= 2.0 * max(avg_w, 1.0):
+            events.append((run_start, min(end_t, run_start + MAX_JAYWALKING_SEC)))
+
     for p in track.history:
         on_road = road.on_road(p.cx, p.cy)
         if on_road:
             if run_start is None:
                 run_start = p.t
+                run_points = []
+            run_points.append(p)
         else:
-            if run_start is not None:
-                events.append((run_start, prev.t if prev else p.t))
+            flush(prev.t if prev else p.t)
             run_start = None
+            run_points = []
         prev = p
     if run_start is not None:
-        events.append((run_start, track.history[-1].t))
+        flush(track.history[-1].t)
     return [(s, e) for s, e in events if e > s]
 
 
@@ -216,6 +250,7 @@ def _pairwise_events(tracks: Dict[int, Track]) -> Tuple[
             overlap_run_start = None
             close_run_start = None
             had_contact_in_close_run = False
+            last_high_closing_t = None
             prev_t = None
             prev_dist = None
 
@@ -226,7 +261,7 @@ def _pairwise_events(tracks: Dict[int, Track]) -> Tuple[
                 pa, pb = idx_a[t], idx_b[t]
                 box_a = (pa.cx - pa.w / 2, pa.cy - pa.h / 2, pa.w, pa.h)
                 box_b = (pb.cx - pb.w / 2, pb.cy - pb.h / 2, pb.w, pb.h)
-                overlap = iou(box_a, box_b) > 0.02
+                overlap = iou(box_a, box_b) > ACCIDENT_IOU_THRESHOLD
                 d = distance((pa.cx, pa.cy), (pb.cx, pb.cy))
                 closing_speed = (
                     (prev_dist - d) / (t - prev_t)
@@ -250,12 +285,22 @@ def _pairwise_events(tracks: Dict[int, Track]) -> Tuple[
                     if close_run_start is None:
                         close_run_start = t
                         had_contact_in_close_run = False
+                        last_high_closing_t = None
                     if closing_speed >= NEAR_MISS_MIN_CLOSING_SPEED:
                         had_contact_in_close_run = True
+                        last_high_closing_t = t
                 else:
                     if close_run_start is not None:
+                        # A near_miss is the evasive episode itself, not
+                        # however long the two tracks happen to stay nearby
+                        # afterward (e.g. queued traffic can sit "close" for
+                        # a long time with no further high-relative-speed
+                        # moment -- that's not a sustained near-miss). End
+                        # the event shortly after the last high-closing-
+                        # speed sample, not at the end of proximity.
                         if had_contact_in_close_run and t - close_run_start >= 0.4:
-                            near_miss.append((close_run_start, t))
+                            end = min(t, last_high_closing_t + NEAR_MISS_END_GRACE_SEC)
+                            near_miss.append((close_run_start, end))
                         close_run_start = None
 
                 prev_t, prev_dist = t, d
@@ -263,7 +308,8 @@ def _pairwise_events(tracks: Dict[int, Track]) -> Tuple[
             if overlap_run_start is not None and shared[-1] - overlap_run_start >= MIN_ACCIDENT_OVERLAP_SEC:
                 accident.append((overlap_run_start, shared[-1]))
             if close_run_start is not None and had_contact_in_close_run:
-                near_miss.append((close_run_start, shared[-1]))
+                end = min(shared[-1], last_high_closing_t + NEAR_MISS_END_GRACE_SEC)
+                near_miss.append((close_run_start, end))
 
     return accident, near_miss, failure_to_yield
 

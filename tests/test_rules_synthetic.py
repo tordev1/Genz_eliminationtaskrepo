@@ -39,22 +39,65 @@ def test_brief_stop_does_not_fire_stopped_vehicle():
     assert "stopped_vehicle" not in labels
 
 
-def test_wrong_way_fires_against_dominant_flow():
+def test_wrong_way_fires_against_local_dominant_flow():
+    """wrong_way must compare a track against the LOCALLY-observed dominant
+    direction (same lane / spatial neighborhood), not one scene-wide average
+    -- a global average breaks on a divided two-way road, where legal
+    traffic already flows in two directions at once (see src/road_model.py
+    module docstring). So the "wrong way" vehicle here shares the same
+    grid cell (same lane, roughly) as the dominant traffic it opposes,
+    offset just enough in y to avoid a literal bounding-box overlap
+    (which would register as `accident` instead and confuse the assertion).
+    """
     duration = rules_mod.WRONG_WAY_MIN_SEC + 3.0
     speed = rules_mod.WRONG_WAY_MIN_SPEED_PX_S * 3
-    # Five vehicles establishing a strong left-to-right dominant flow.
+    # Three vehicles establishing a dominant left-to-right flow, all in the
+    # same grid row (y in [300, 360) with an 8x8 grid over a 640x480 frame),
+    # starting at x=250 so their path (250 -> ~412) actually passes through
+    # the same grid columns as the wrong-way vehicle below during this short
+    # window (columns ~3-5). Small (10px-tall) boxes spaced 15px apart in y
+    # so the three of them -- and the wrong-way vehicle at y=345 -- never
+    # bounding-box-overlap each other (which would register as an `accident`
+    # and confuse this test's assertion; a real box-overlap scenario is
+    # covered separately by the accident tests below).
     tracks = {}
-    for i in range(5):
-        pts = [(t, 50.0 + speed * t, 300.0 + i, 30.0, 20.0) for t in _times(0.0, duration, 0.2)]
+    for i, y in enumerate((300.0, 315.0, 330.0)):
+        pts = [(t, 250.0 + speed * t, y, 30.0, 10.0) for t in _times(0.0, duration, 0.2)]
         tracks[i] = _track(i, "vehicle", pts)
-    # One vehicle driving straight against it (right-to-left), well past the
-    # angle and duration thresholds.
-    pts = [(t, 600.0 - speed * t, 100.0, 30.0, 20.0) for t in _times(0.0, duration, 0.2)]
+    # One vehicle driving straight against it (right-to-left) through the
+    # same lane/row (y=345; x=450 -> ~288, same grid columns ~3-5 as the
+    # flow above, so it actually has local traffic to be measured against).
+    pts = [(t, 450.0 - speed * t, 345.0, 30.0, 10.0) for t in _times(0.0, duration, 0.2)]
     tracks[99] = _track(99, "vehicle", pts)
 
     events = build_events(tracks, FRAME_SHAPE, duration=duration + 1)
     labels = [e[2] for e in events]
     assert "wrong_way" in labels
+    assert "accident" not in labels  # sanity: the two lanes shouldn't have touched
+
+
+def test_wrong_way_does_not_fire_on_opposing_carriageway_in_a_different_lane():
+    """The actual bug this local model fixes: a vehicle on the OTHER
+    carriageway of a divided road (spatially far from the lane being
+    measured) must not be flagged just because it's going a different
+    direction than that unrelated lane's traffic -- it has its own local
+    neighborhood (here, no other traffic in the file for the design of this
+    exact test), and 0 comparison samples means no verdict, not a false one.
+    """
+    duration = rules_mod.WRONG_WAY_MIN_SEC + 3.0
+    speed = rules_mod.WRONG_WAY_MIN_SPEED_PX_S * 3
+    tracks = {}
+    for i in range(5):
+        pts = [(t, 50.0 + speed * t, 100.0 + i, 30.0, 20.0) for t in _times(0.0, duration, 0.2)]
+        tracks[i] = _track(i, "vehicle", pts)
+    # Far away (different grid cell / carriageway), opposite direction --
+    # this used to false-positive under the old single-global-average model.
+    pts = [(t, 600.0 - speed * t, 400.0, 30.0, 20.0) for t in _times(0.0, duration, 0.2)]
+    tracks[99] = _track(99, "vehicle", pts)
+
+    events = build_events(tracks, FRAME_SHAPE, duration=duration + 1)
+    labels = [e[2] for e in events]
+    assert "wrong_way" not in labels
 
 
 def test_accident_fires_on_sustained_vehicle_vehicle_overlap():
