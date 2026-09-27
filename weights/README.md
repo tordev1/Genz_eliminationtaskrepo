@@ -19,3 +19,13 @@ tool for this challenge's fixed, non-moving camera.
 `download.sh` in this folder fetches that checkpoint with internet access,
 per the challenge's "run once, with internet, before evaluation" rule for
 weights. It is not required for the baseline to run.
+
+**Offline caveat**: `ultralytics` (the library, not our code) can attempt
+telemetry/analytics network calls on some versions. `YoloDetector.try_create`
+already wraps model loading in a broad `try/except` that falls back to
+`MotionDetector` on any failure, so a network hiccup degrades gracefully
+rather than crashing -- but this path has not been tested in a genuinely
+offline environment. If you enable it, test `run_submission.py` with
+networking disabled before relying on it for the graded run. The default
+configuration (no file here) has zero network dependency, verified by
+grepping `solution.py` and all of `src/` for network-related imports/calls.
