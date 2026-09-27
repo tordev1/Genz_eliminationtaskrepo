@@ -1,0 +1,3 @@
+# Dev-only tooling -- NOT needed to run solution.py/run_submission.py/evaluate.py,
+# so kept out of requirements.txt (which the organizers install for grading).
+pytest>=8.0

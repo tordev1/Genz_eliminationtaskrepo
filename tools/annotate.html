@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Genz dev-set annotator</title>
+<style>
+  :root {
+    --bg: #14181c; --panel: #1c2126; --border: #2c333a; --text: #e6e9ec;
+    --dim: #8a9199; --accent: #4fa8e0; --danger: #e05c5c; --ok: #4fbf7f;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font-family: system-ui, -apple-system, sans-serif; font-size: 14px;
+  }
+  header {
+    padding: 14px 20px; border-bottom: 1px solid var(--border);
+    display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;
+  }
+  header h1 { font-size: 16px; margin: 0; }
+  header p { margin: 2px 0 0; color: var(--dim); font-size: 12.5px; }
+  main { display: grid; grid-template-columns: 1fr 340px; gap: 0; min-height: calc(100vh - 60px); }
+  @media (max-width: 900px) { main { grid-template-columns: 1fr; } }
+  .video-pane { padding: 20px; border-right: 1px solid var(--border); }
+  .side-pane { padding: 20px; overflow-y: auto; }
+  video { width: 100%; max-height: 60vh; background: #000; border-radius: 6px; }
+  .file-row { display: flex; gap: 8px; align-items: center; margin-bottom: 14px; flex-wrap: wrap; }
+  input[type=file] { color: var(--text); }
+  input[type=number], input[type=text], select {
+    background: var(--panel); color: var(--text); border: 1px solid var(--border);
+    border-radius: 4px; padding: 6px 8px; font-size: 13.5px;
+  }
+  button {
+    background: var(--panel); color: var(--text); border: 1px solid var(--border);
+    border-radius: 4px; padding: 7px 12px; font-size: 13.5px; cursor: pointer;
+  }
+  button:hover { border-color: var(--accent); }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #0a0e12; font-weight: 600; }
+  button.danger { color: var(--danger); }
+  .transport { display: flex; gap: 6px; align-items: center; margin: 10px 0; flex-wrap: wrap; }
+  .transport .t { color: var(--dim); font-variant-numeric: tabular-nums; min-width: 90px; }
+  .mark-row { display: flex; gap: 8px; align-items: center; margin: 14px 0; flex-wrap: wrap; }
+  .mark-row select { flex: 1; min-width: 160px; }
+  fieldset { border: 1px solid var(--border); border-radius: 6px; padding: 10px 12px; margin-bottom: 14px; }
+  legend { color: var(--dim); font-size: 12px; padding: 0 6px; }
+  table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  th, td { text-align: left; padding: 5px 6px; border-bottom: 1px solid var(--border); }
+  th { color: var(--dim); font-weight: 500; }
+  .pill { display: inline-block; padding: 1px 7px; border-radius: 10px; background: var(--panel); border: 1px solid var(--border); font-size: 11.5px; }
+  .video-list { list-style: none; margin: 0; padding: 0; }
+  .video-list li {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 6px 8px; border-radius: 4px; cursor: pointer; margin-bottom: 2px;
+  }
+  .video-list li:hover { background: var(--panel); }
+  .video-list li.active { background: #24313d; }
+  .video-list .count { color: var(--dim); font-size: 11.5px; }
+  .hint { color: var(--dim); font-size: 12px; line-height: 1.5; }
+  .pending { color: var(--ok); font-weight: 600; }
+  a.export-link {
+    display: block; text-align: center; margin-top: 10px; padding: 9px;
+    background: var(--ok); color: #06210f; border-radius: 4px; text-decoration: none; font-weight: 600;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div>
+    <h1>Genz dev-set annotator</h1>
+    <p>Local, offline, no upload -- runs entirely in this browser tab. Produces a ground_truth.json in the exact challenge schema.</p>
+  </div>
+  <div class="pill" id="video-count">0 video(s) annotated</div>
+</header>
+
+<main>
+  <div class="video-pane">
+    <div class="file-row">
+      <input type="file" id="file-input" accept="video/mp4">
+      <label>fps <input type="number" id="fps-input" value="25" min="1" step="0.01" style="width:70px"></label>
+    </div>
+
+    <video id="player" controls></video>
+
+    <div class="transport">
+      <button id="step-back">&larr; frame</button>
+      <button id="step-fwd">frame &rarr;</button>
+      <span class="t" id="time-display">t = 0.00s</span>
+    </div>
+
+    <fieldset>
+      <legend>Mark event</legend>
+      <div class="mark-row">
+        <select id="class-select"></select>
+        <button id="mark-start">Mark start</button>
+        <button id="mark-end" class="primary">Mark end &amp; add</button>
+      </div>
+      <p class="hint" id="pending-hint">No pending start marked yet.</p>
+    </fieldset>
+
+    <fieldset>
+      <legend>Events for current video</legend>
+      <table>
+        <thead><tr><th>start</th><th>end</th><th>label</th><th></th></tr></thead>
+        <tbody id="events-body"></tbody>
+      </table>
+      <p class="hint" id="no-events-hint">No events added yet.</p>
+    </fieldset>
+  </div>
+
+  <div class="side-pane">
+    <fieldset>
+      <legend>Videos in this session</legend>
+      <ul class="video-list" id="video-list"></ul>
+      <p class="hint">Load a new .mp4 above to add another video to this session. Switching the file input starts a new entry keyed by the file's name -- exactly the key ground_truth.json expects.</p>
+    </fieldset>
+
+    <fieldset>
+      <legend>Conventions (from the task spec)</legend>
+      <p class="hint">
+        Start/end follow the Start/End columns of the Event classes table --
+        e.g. accident starts at first visible contact and ends when all
+        involved objects stop moving or leave the frame; near_miss starts at
+        the onset of evasive action and ends when road users are clear.
+        Segments of the <b>same class</b> in one video must not overlap;
+        different classes may overlap freely (e.g. wrong_way + accident).
+      </p>
+    </fieldset>
+
+    <button class="primary" id="export-btn" style="width:100%">Export ground_truth.json</button>
+    <a id="export-link" class="export-link" style="display:none" download="ground_truth.json">Click to save the file</a>
+  </div>
+</main>
+
+<script>
+const CLASSES = [
+  "accident", "near_miss", "red_light", "wrong_way", "illegal_u_turn",
+  "stopped_vehicle", "jaywalking", "failure_to_yield", "illegal_turn",
+  "solid_line_crossing", "stop_line", "congestion", "road_obstacle", "fire_smoke",
+];
+
+const state = { videos: {}, currentName: null, pendingStart: null };
+
+const el = (id) => document.getElementById(id);
+const player = el('player');
+const fpsInput = el('fps-input');
+const classSelect = el('class-select');
+
+for (const c of CLASSES) {
+  const opt = document.createElement('option');
+  opt.value = c; opt.textContent = c;
+  classSelect.appendChild(opt);
+}
+
+function loadSaved() {
+  try {
+    const raw = localStorage.getItem('genz_annotate_session');
+    if (raw) state.videos = JSON.parse(raw).videos || {};
+  } catch (e) { /* private window / blocked storage: just start empty */ }
+}
+function persist() {
+  try {
+    localStorage.setItem('genz_annotate_session', JSON.stringify({ videos: state.videos }));
+  } catch (e) { /* non-critical convenience only */ }
+}
+loadSaved();
+
+el('file-input').addEventListener('change', (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const url = URL.createObjectURL(file);
+  player.src = url;
+  state.currentName = file.name;
+  if (!state.videos[file.name]) {
+    state.videos[file.name] = { duration: 0, fps: parseFloat(fpsInput.value) || 25, events: [] };
+  }
+  player.onloadedmetadata = () => {
+    state.videos[file.name].duration = Math.round(player.duration * 100) / 100;
+    renderAll();
+  };
+  state.pendingStart = null;
+  renderAll();
+});
+
+fpsInput.addEventListener('change', () => {
+  if (state.currentName) {
+    state.videos[state.currentName].fps = parseFloat(fpsInput.value) || 25;
+    persist();
+  }
+});
+
+function frameStep(dir) {
+  const fps = parseFloat(fpsInput.value) || 25;
+  player.currentTime = Math.max(0, player.currentTime + dir * (1 / fps));
+}
+el('step-back').addEventListener('click', () => frameStep(-1));
+el('step-fwd').addEventListener('click', () => frameStep(1));
+player.addEventListener('timeupdate', () => {
+  el('time-display').textContent = `t = ${player.currentTime.toFixed(2)}s`;
+});
+
+el('mark-start').addEventListener('click', () => {
+  state.pendingStart = player.currentTime;
+  el('pending-hint').textContent = `Pending start: ${state.pendingStart.toFixed(2)}s -- now play/seek to the end and click "Mark end".`;
+  el('pending-hint').className = 'hint pending';
+});
+
+el('mark-end').addEventListener('click', () => {
+  if (!state.currentName) { alert('Load a video first.'); return; }
+  if (state.pendingStart === null) { alert('Mark a start time first.'); return; }
+  const end = player.currentTime;
+  const start = state.pendingStart;
+  if (!(start < end)) { alert('End must be after start -- seek forward first.'); return; }
+  const label = classSelect.value;
+  state.videos[state.currentName].events.push([
+    Math.round(start * 100) / 100, Math.round(end * 100) / 100, label,
+  ]);
+  state.pendingStart = null;
+  el('pending-hint').textContent = 'No pending start marked yet.';
+  el('pending-hint').className = 'hint';
+  persist();
+  renderAll();
+});
+
+function deleteEvent(name, idx) {
+  state.videos[name].events.splice(idx, 1);
+  persist();
+  renderAll();
+}
+
+function switchTo(name) {
+  // Re-select: the browser can't reopen a file picker's file programmatically,
+  // so switching just changes which video's event table/list is shown; to
+  // actually re-view that video's frames, re-pick it from the file input.
+  state.currentName = name;
+  fpsInput.value = state.videos[name].fps;
+  renderAll();
+}
+
+function renderAll() {
+  // video list
+  const names = Object.keys(state.videos);
+  el('video-count').textContent = `${names.length} video(s) annotated`;
+  const list = el('video-list');
+  list.innerHTML = '';
+  for (const name of names) {
+    const li = document.createElement('li');
+    if (name === state.currentName) li.className = 'active';
+    const label = document.createElement('span');
+    label.textContent = name;
+    const count = document.createElement('span');
+    count.className = 'count';
+    count.textContent = `${state.videos[name].events.length} event(s)`;
+    li.appendChild(label);
+    li.appendChild(count);
+    li.addEventListener('click', () => switchTo(name));
+    list.appendChild(li);
+  }
+
+  // events table
+  const body = el('events-body');
+  body.innerHTML = '';
+  const events = state.currentName ? state.videos[state.currentName].events : [];
+  el('no-events-hint').style.display = events.length ? 'none' : 'block';
+  events.forEach((ev, idx) => {
+    const tr = document.createElement('tr');
+    const [s, e, label] = ev;
+    tr.innerHTML = `<td>${s.toFixed(2)}</td><td>${e.toFixed(2)}</td><td>${label}</td>`;
+    const tdBtn = document.createElement('td');
+    const btn = document.createElement('button');
+    btn.textContent = 'delete'; btn.className = 'danger';
+    btn.addEventListener('click', () => deleteEvent(state.currentName, idx));
+    tdBtn.appendChild(btn);
+    tr.appendChild(tdBtn);
+    body.appendChild(tr);
+  });
+}
+
+el('export-btn').addEventListener('click', () => {
+  const out = {};
+  for (const [name, v] of Object.entries(state.videos)) {
+    out[name] = { duration: v.duration, fps: v.fps, events: v.events };
+  }
+  const blob = new Blob([JSON.stringify(out, null, 1)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const link = el('export-link');
+  link.href = url;
+  link.style.display = 'block';
+  link.textContent = `Save ground_truth.json (${Object.keys(out).length} video(s))`;
+});
+
+renderAll();
+</script>
+
+</body>
+</html>
