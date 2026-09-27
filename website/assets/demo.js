@@ -19,7 +19,8 @@
   "use strict";
 
   var MAX_BYTES = 200 * 1024 * 1024; // 200 MB, matches the limit stated on the page
-  var MAX_SECONDS = 30; // kept short for this demo's hosting; server re-checks with an actual video probe
+  var MAX_SECONDS = 150; // server re-checks with an actual video probe
+  var POLL_INTERVAL_MS = 2000;
 
   var fileInput = document.getElementById("demo-file");
   var runBtn = document.getElementById("demo-run");
@@ -179,8 +180,7 @@
     runBtn.disabled = true;
     setStatus(
       null,
-      "Uploading and running detect_events()… this runs on CPU and can take " +
-        "up to a minute or two for a full clip.",
+      "Uploading… this runs on CPU and can take a while for a longer clip.",
       true
     );
 
@@ -190,28 +190,21 @@
     fetch("/api/detect_events", { method: "POST", body: fd })
       .then(function (res) {
         return res.json().then(function (data) {
-          return { ok: res.ok, data: data };
+          return { ok: res.ok, status: res.status, data: data };
         }).catch(function () {
-          return { ok: res.ok, data: null };
+          return { ok: res.ok, status: res.status, data: null };
         });
       })
       .then(function (result) {
-        runBtn.disabled = false;
-        if (!result.ok || !result.data) {
+        if (!result.data || (!result.ok && result.status !== 202)) {
+          runBtn.disabled = false;
           var msg =
             (result.data && result.data.error) ||
             "The server returned an error (HTTP status without a JSON body).";
           setStatus("error", msg, false);
           return;
         }
-        var events = result.data.events || [];
-        setStatus(
-          "ok",
-          "Done — " + events.length + " event(s) found (Part A only; " +
-            "risk-curve visualization: coming soon).",
-          false
-        );
-        renderEvents(events);
+        pollJob(result.data.job_id, 0);
       })
       .catch(function () {
         runBtn.disabled = false;
@@ -223,6 +216,56 @@
             "will not run the model. See website/README.md.",
           false
         );
+      });
+  }
+
+  function pollJob(jobId, elapsedSec) {
+    setStatus(
+      null,
+      "Running detect_events()… " + elapsedSec + "s elapsed. This can take " +
+        "a few minutes for a longer clip.",
+      true
+    );
+
+    fetch("/api/detect_events/status/" + jobId)
+      .then(function (res) {
+        return res.json().then(function (data) {
+          return { ok: res.ok, data: data };
+        }).catch(function () {
+          return { ok: false, data: null };
+        });
+      })
+      .then(function (result) {
+        var data = result.data;
+        if (!result.ok || !data || data.status === "error") {
+          runBtn.disabled = false;
+          setStatus(
+            "error",
+            (data && data.error) || "Lost track of this job on the server.",
+            false
+          );
+          return;
+        }
+        if (data.status === "running") {
+          setTimeout(function () {
+            pollJob(jobId, elapsedSec + POLL_INTERVAL_MS / 1000);
+          }, POLL_INTERVAL_MS);
+          return;
+        }
+        // status === "done"
+        runBtn.disabled = false;
+        var events = data.events || [];
+        setStatus(
+          "ok",
+          "Done — " + events.length + " event(s) found (Part A only; " +
+            "risk-curve visualization: coming soon).",
+          false
+        );
+        renderEvents(events);
+      })
+      .catch(function () {
+        runBtn.disabled = false;
+        setStatus("error", "Lost connection to the demo server while waiting for a result.", false);
       });
   }
 

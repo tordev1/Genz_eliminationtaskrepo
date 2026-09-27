@@ -3,11 +3,25 @@
 A single-file Flask app that:
   1. Serves website/index.html and website/assets/* as plain static files.
   2. Accepts an uploaded .mp4 (POST /api/detect_events, multipart field
-     "video"), runs the repo's own solution.detect_events() on it, and
-     returns the real result as JSON: {"events": [[start_sec, end_sec, label], ...]}.
+     "video"), runs the repo's own solution.detect_events() on it in the
+     background, and lets the client poll for the result
+     (GET /api/detect_events/status/<job_id>) as
+     {"status": "running"} / {"status": "done", "events": [...]} /
+     {"status": "error", "error": "..."}.
 
 It imports solution.py from the repository root (this file adds that root to
 sys.path -- it does not duplicate or reimplement any detection logic).
+
+Why a job queue instead of blocking the request until detection finishes:
+this demo is hosted on a shared cPanel/Passenger plan whose reverse proxy
+enforces its own short request timeout, independent of anything this process
+sets. Empirically, processing a real ~90s 4K-sourced clip synchronously
+either hung past that proxy timeout with no response at all, or failed
+outright after ~15-17s -- well under what solution.detect_events() itself
+actually needs. Returning a job id immediately (fast, tiny response) and
+letting the client poll a status endpoint (also fast and tiny) sidesteps
+that proxy timeout entirely: only the background thread's own processing
+time is unbounded by HTTP, bounded instead by JOB_TIMEOUT_SEC below.
 
 Run it:
     pip install -r website/requirements.txt   # installs flask only
@@ -24,10 +38,14 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
+import threading
+import time
 import traceback
+import uuid
 
 from flask import Flask, jsonify, request, send_from_directory
 
@@ -41,14 +59,17 @@ if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
 MAX_CONTENT_BYTES = 200 * 1024 * 1024  # 200 MB, matches the limit stated on the page
-# Deliberately conservative: this demo has been observed to run on shared
-# hosting with a short (~15s) request timeout and a tight per-process
-# memory cap -- 30s keeps real processing time well inside that, even
-# though solution.py itself has no such limit (the actual submission's
-# time budget is 3x video duration, per the challenge spec; this cap is a
-# demo-hosting constraint only, not a pipeline limitation).
-MAX_DURATION_SEC = 30.0
-WORKER_TIMEOUT_SEC = 45.0
+# Upload-side duration cap. Detection itself runs in the background (see
+# module docstring), so this is not a request-timeout constraint -- it's a
+# sanity limit on how long a demo visitor should have to wait for a result.
+MAX_DURATION_SEC = 150.0
+# Hard ceiling on the background job itself (well above what 150s of footage
+# should need with the pipeline's own internal downscaling); a safety valve
+# against a pathological input hanging forever, not a value we expect to hit.
+JOB_TIMEOUT_SEC = 300.0
+
+JOBS_DIR = os.path.join(tempfile.gettempdir(), "genz_demo_jobs")
+JOB_RETENTION_SEC = 3600.0  # best-effort cleanup of old job directories
 
 app = Flask(__name__, static_folder=None)
 app.config["MAX_CONTENT_LENGTH"] = MAX_CONTENT_BYTES
@@ -90,6 +111,67 @@ def _probe_duration_sec(video_path: str):
     return n_frames / fps
 
 
+def _job_paths(job_id: str):
+    job_dir = os.path.join(JOBS_DIR, job_id)
+    return job_dir, os.path.join(job_dir, "input.mp4"), os.path.join(job_dir, "status.json")
+
+
+def _write_status(status_path: str, payload: dict):
+    tmp_path = status_path + ".tmp"
+    with open(tmp_path, "w") as f:
+        json.dump(payload, f)
+    os.replace(tmp_path, status_path)
+
+
+def _cleanup_old_jobs():
+    if not os.path.isdir(JOBS_DIR):
+        return
+    now = time.time()
+    try:
+        for name in os.listdir(JOBS_DIR):
+            path = os.path.join(JOBS_DIR, name)
+            try:
+                if now - os.path.getmtime(path) > JOB_RETENTION_SEC:
+                    shutil.rmtree(path, ignore_errors=True)
+            except OSError:
+                continue
+    except OSError:
+        pass
+
+
+def _run_job(job_id: str, video_path: str, status_path: str):
+    try:
+        result = subprocess.run(
+            [sys.executable, WORKER_SCRIPT, video_path],
+            capture_output=True, text=True, timeout=JOB_TIMEOUT_SEC,
+        )
+        if result.returncode != 0:
+            print("detect worker failed:\n", result.stderr, file=sys.stderr)
+            _write_status(status_path, {
+                "status": "error",
+                "error": "solution.detect_events() raised an exception while processing this file.",
+            })
+            return
+        payload = json.loads(result.stdout.strip().splitlines()[-1])
+        _write_status(status_path, {"status": "done", "events": payload["events"]})
+    except subprocess.TimeoutExpired:
+        _write_status(status_path, {
+            "status": "error",
+            "error": f"Processing took longer than {JOB_TIMEOUT_SEC:.0f}s and was stopped. Try a shorter clip.",
+        })
+    except Exception:
+        traceback.print_exc()
+        _write_status(status_path, {
+            "status": "error",
+            "error": "solution.detect_events() raised an exception while processing this file.",
+        })
+    finally:
+        try:
+            os.remove(video_path)
+        except OSError:
+            pass
+
+
 @app.route("/api/detect_events", methods=["POST"])
 def detect_events_endpoint():
     upload = request.files.get("video")
@@ -99,18 +181,20 @@ def detect_events_endpoint():
     if not upload.filename.lower().endswith(".mp4"):
         return jsonify({"error": "Only .mp4 files are supported by this demo."}), 400
 
-    tmp_path = None
-    try:
-        with tempfile.NamedTemporaryFile(
-            suffix=".mp4", delete=False, dir=None
-        ) as tmp_file:
-            upload.save(tmp_file)
-            tmp_path = tmp_file.name
+    _cleanup_old_jobs()
 
-        duration = _probe_duration_sec(tmp_path)
+    job_id = uuid.uuid4().hex
+    job_dir, video_path, status_path = _job_paths(job_id)
+    os.makedirs(job_dir, exist_ok=True)
+
+    try:
+        upload.save(video_path)
+
+        duration = _probe_duration_sec(video_path)
         # +1.0s tolerance: frame-count/fps duration probing is approximate, so
         # a clip meant to be exactly at the limit can probe a hair over it.
         if duration is not None and duration > MAX_DURATION_SEC + 1.0:
+            shutil.rmtree(job_dir, ignore_errors=True)
             return (
                 jsonify(
                     {
@@ -123,46 +207,37 @@ def detect_events_endpoint():
                 400,
             )
 
+        _write_status(status_path, {"status": "running"})
+
         # Run detection in a fresh subprocess rather than in-process: OpenCV
         # and numpy often don't release memory back to the OS even after
         # Python's own GC runs, and this Flask worker is long-lived on the
         # host (Passenger reuses it across requests). A subprocess fully
         # releases its memory to the OS on exit, which matters on
         # memory-constrained shared hosting -- see the module docstring in
-        # _detect_worker.py.
-        result = subprocess.run(
-            [sys.executable, WORKER_SCRIPT, tmp_path],
-            capture_output=True, text=True, timeout=WORKER_TIMEOUT_SEC,
-        )
-        if result.returncode != 0:
-            print("detect worker failed:\n", result.stderr, file=sys.stderr)
-            return (
-                jsonify({"error": "solution.detect_events() raised an exception while processing this file."}),
-                500,
-            )
-        payload = json.loads(result.stdout.strip().splitlines()[-1])
-        return jsonify(payload)
+        # _detect_worker.py. It runs in a background thread so this request
+        # can return immediately with just the job id (see module docstring).
+        t = threading.Thread(target=_run_job, args=(job_id, video_path, status_path), daemon=True)
+        t.start()
 
-    except subprocess.TimeoutExpired:
-        return (
-            jsonify({"error": f"Processing took longer than {WORKER_TIMEOUT_SEC:.0f}s and was stopped. Try a shorter clip."}),
-            504,
-        )
+        return jsonify({"job_id": job_id}), 202
+
     except Exception:
-        # Full traceback goes to the server log, not the HTTP response --
-        # this file is meant to be deployed publicly (see website/README.md),
-        # and a stack trace can leak local paths to the client.
         traceback.print_exc()
-        return (
-            jsonify({"error": "solution.detect_events() raised an exception while processing this file."}),
-            500,
-        )
-    finally:
-        if tmp_path and os.path.exists(tmp_path):
-            try:
-                os.remove(tmp_path)
-            except OSError:
-                pass
+        shutil.rmtree(job_dir, ignore_errors=True)
+        return jsonify({"error": "Could not accept this upload."}), 500
+
+
+@app.route("/api/detect_events/status/<job_id>")
+def detect_events_status(job_id):
+    _, _, status_path = _job_paths(job_id)
+    if not os.path.exists(status_path):
+        return jsonify({"status": "error", "error": "Unknown or expired job id."}), 404
+    try:
+        with open(status_path) as f:
+            return jsonify(json.load(f))
+    except (OSError, ValueError):
+        return jsonify({"status": "running"})
 
 
 if __name__ == "__main__":
